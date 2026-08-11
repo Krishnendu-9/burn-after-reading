@@ -1,0 +1,14 @@
+node_modules/
+.claude/
+public/dist/
+data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+.DS_Store
+npm-debug.log*
+
+# Private developer notes — kept local, not part of the public repo.
+dev_docs.md

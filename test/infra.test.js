@@ -1,0 +1,254 @@
+import test, { before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+let dir;
+let store;
+let db;
+let redactPath;
+
+before(async () => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bar-infra-'));
+  process.env.DATABASE_PATH = path.join(dir, 'infra.db');
+  process.env.SECRET_KEY = crypto.randomBytes(32).toString('hex');
+
+  db = await import('../src/db.js');
+  store = await import('../src/rate-limit-store.js');
+  ({ redactPath } = await import('../src/logging.js'));
+});
+
+after(() => {
+  db.closeDatabase();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+/* ------------------------------------------------- rate limit store (#10) */
+
+test('counts survive a new store instance, the way they survive a restart', () => {
+  const first = new store.SqliteRateLimitStore('test-a');
+  first.init({ windowMs: 60_000 });
+
+  for (let i = 0; i < 5; i += 1) first.increment('1.2.3.4');
+
+  // A fresh instance is what a restarted process gets. An in-memory store would
+  // start again from zero here.
+  const second = new store.SqliteRateLimitStore('test-a');
+  second.init({ windowMs: 60_000 });
+
+  assert.equal(second.increment('1.2.3.4').totalHits, 6);
+});
+
+test('different limiters keep separate counts for the same address', () => {
+  const create = new store.SqliteRateLimitStore('test-create');
+  const reveal = new store.SqliteRateLimitStore('test-reveal');
+  create.init({ windowMs: 60_000 });
+  reveal.init({ windowMs: 60_000 });
+
+  create.increment('9.9.9.9');
+  create.increment('9.9.9.9');
+
+  assert.equal(reveal.increment('9.9.9.9').totalHits, 1);
+});
+
+test('an elapsed window starts counting again from one', () => {
+  const shortLived = new store.SqliteRateLimitStore('test-window');
+  shortLived.init({ windowMs: -1 }); // already expired the moment it is written
+
+  shortLived.increment('5.5.5.5');
+  assert.equal(shortLived.increment('5.5.5.5').totalHits, 1);
+});
+
+test('resetKey clears just that key', () => {
+  const limiter = new store.SqliteRateLimitStore('test-reset');
+  limiter.init({ windowMs: 60_000 });
+
+  limiter.increment('7.7.7.7');
+  limiter.increment('8.8.8.8');
+  limiter.resetKey('7.7.7.7');
+
+  assert.equal(limiter.increment('7.7.7.7').totalHits, 1);
+  assert.equal(limiter.increment('8.8.8.8').totalHits, 2);
+});
+
+test('purgeRateLimits drops elapsed windows and keeps live ones', () => {
+  const stale = new store.SqliteRateLimitStore('test-purge-old');
+  const live = new store.SqliteRateLimitStore('test-purge-new');
+  stale.init({ windowMs: -1 });
+  live.init({ windowMs: 600_000 });
+
+  stale.increment('1.1.1.1');
+  live.increment('2.2.2.2');
+
+  assert.ok(store.purgeRateLimits() >= 1);
+  assert.equal(live.increment('2.2.2.2').totalHits, 2, 'live window should survive');
+});
+
+/* ------------------------------------------------- blank environment values */
+
+// .env.example ships every optional value blank, so a copied .env is full of
+// lines like `MAX_SECRETS=`. dotenv loads those as empty strings, and `??` does
+// not treat an empty string as missing — which once turned the storage ceiling
+// into zero and made the app refuse every secret.
+test('a blank value is treated the same as an unset one', async () => {
+  const { envString, envNumber, envFlag, envTrustProxy } = await import('../src/env.js');
+
+  process.env.BAR_BLANK = '';
+  process.env.BAR_SPACES = '   ';
+  delete process.env.BAR_UNSET;
+
+  assert.equal(envString('BAR_BLANK', 'fallback'), 'fallback');
+  assert.equal(envString('BAR_SPACES', 'fallback'), 'fallback');
+  assert.equal(envString('BAR_UNSET', 'fallback'), 'fallback');
+  assert.equal(envString('BAR_UNSET'), null);
+
+  assert.equal(envNumber('BAR_BLANK', 10_000), 10_000);
+  assert.equal(envNumber('BAR_UNSET', 10_000), 10_000);
+
+  assert.equal(envFlag('BAR_BLANK', true), true);
+  assert.equal(envTrustProxy('BAR_BLANK'), false);
+
+  delete process.env.BAR_BLANK;
+  delete process.env.BAR_SPACES;
+});
+
+test('numbers that would silently disable a feature fall back instead', async () => {
+  const { envNumber } = await import('../src/env.js');
+
+  for (const bad of ['0', '-5', 'abc', 'NaN']) {
+    process.env.BAR_NUM = bad;
+    assert.equal(envNumber('BAR_NUM', 10_000), 10_000, `"${bad}" should fall back`);
+  }
+
+  process.env.BAR_NUM = '250';
+  assert.equal(envNumber('BAR_NUM', 10_000), 250);
+
+  delete process.env.BAR_NUM;
+});
+
+test('trust proxy accepts counts, booleans and named values', async () => {
+  const { envTrustProxy } = await import('../src/env.js');
+
+  const cases = [
+    ['', false],
+    ['false', false],
+    ['true', true],
+    ['1', 1],
+    ['2', 2],
+    ['loopback', 'loopback']
+  ];
+
+  for (const [raw, expected] of cases) {
+    process.env.BAR_TP = raw;
+    assert.equal(envTrustProxy('BAR_TP'), expected, `TRUST_PROXY="${raw}"`);
+  }
+
+  delete process.env.BAR_TP;
+});
+
+test('flags read false/0/no/off as off and anything else as on', async () => {
+  const { envFlag } = await import('../src/env.js');
+
+  for (const off of ['false', 'FALSE', '0', 'no', 'off']) {
+    process.env.BAR_FLAG = off;
+    assert.equal(envFlag('BAR_FLAG', true), false, `"${off}" should be off`);
+  }
+
+  for (const on of ['true', '1', 'yes', 'anything']) {
+    process.env.BAR_FLAG = on;
+    assert.equal(envFlag('BAR_FLAG', false), true, `"${on}" should be on`);
+  }
+
+  delete process.env.BAR_FLAG;
+});
+
+/* --------------------------------------------------------- log safety (#9) */
+
+test('a secret URL is never written to the log in full', () => {
+  const token = crypto.randomUUID();
+
+  assert.equal(redactPath(`/s/${token}`), '/s/:token');
+  assert.ok(!redactPath(`/s/${token}`).includes(token));
+});
+
+test('ordinary paths are logged as they are', () => {
+  assert.equal(redactPath('/'), '/');
+  assert.equal(redactPath('/healthz'), '/healthz');
+  assert.equal(redactPath('/api/secrets'), '/api/secrets');
+});
+
+/* ------------------------------------------------------ log format (#6) */
+
+/** Captures whatever the logger writes, whichever console method it uses. */
+function capture(run) {
+  const lines = [];
+  const real = { log: console.log, warn: console.warn, error: console.error };
+
+  console.log = (...args) => lines.push(args.join(' '));
+  console.warn = (...args) => lines.push(args.join(' '));
+  console.error = (...args) => lines.push(args.join(' '));
+
+  try {
+    run();
+  } finally {
+    Object.assign(console, real);
+  }
+
+  return lines;
+}
+
+test('the text format stays human-readable', async () => {
+  const { configureLogging, logEvent } = await import('../src/logging.js');
+  configureLogging({ format: 'text' });
+
+  const [line] = capture(() =>
+    logEvent('info', 'request', { method: 'GET', status: 200 }, '[req] GET / 200 1.0ms')
+  );
+
+  assert.equal(line, '[req] GET / 200 1.0ms');
+});
+
+test('the json format emits one parseable object per line', async () => {
+  const { configureLogging, logEvent } = await import('../src/logging.js');
+  configureLogging({ format: 'json' });
+
+  const [line] = capture(() =>
+    logEvent('warn', 'request', { method: 'POST', path: '/s/:token', status: 401 }, 'ignored')
+  );
+
+  const parsed = JSON.parse(line);
+  assert.equal(parsed.level, 'warn');
+  assert.equal(parsed.event, 'request');
+  assert.equal(parsed.path, '/s/:token');
+  assert.equal(parsed.status, 401);
+  assert.ok(!Number.isNaN(Date.parse(parsed.ts)), 'ts should be a timestamp');
+
+  configureLogging({ format: 'text' });
+});
+
+test('an unrecognised format falls back to text rather than failing', async () => {
+  const { configureLogging } = await import('../src/logging.js');
+
+  assert.equal(configureLogging({ format: 'yaml' }), 'text');
+  assert.equal(configureLogging({}), 'text');
+  assert.equal(configureLogging({ format: 'json' }), 'json');
+
+  configureLogging({ format: 'text' });
+});
+
+test('json mode never writes a token, whatever the caller passes as text', async () => {
+  const { configureLogging, logEvent, redactPath } = await import('../src/logging.js');
+  configureLogging({ format: 'json' });
+
+  const token = crypto.randomUUID();
+  const [line] = capture(() =>
+    logEvent('info', 'request', { path: redactPath(`/s/${token}`) }, `/s/${token}`)
+  );
+
+  assert.ok(!line.includes(token), 'the token must not survive into the json line');
+  assert.equal(JSON.parse(line).path, '/s/:token');
+
+  configureLogging({ format: 'text' });
+});

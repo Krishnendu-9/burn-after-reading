@@ -1,0 +1,33 @@
+{
+  "name": "burn-after-reading",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "One-time, self-destructing secret links. Express + better-sqlite3 + AES-256-GCM.",
+  "scripts": {
+    "dev": "concurrently -k -n vite,server -c magenta,cyan \"vite build --watch\" \"node --watch server.js\"",
+    "build": "vite build",
+    "start": "node server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "keygen": "node scripts/keygen.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^17.2.1",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.6.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "concurrently": "^9.2.0",
+    "tailwindcss": "^4.1.11",
+    "vite": "^7.0.6"
+  }
+}

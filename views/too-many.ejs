@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <%- include('partials/head', { title: 'Slow down a moment' }) %>
+  </head>
+  <body class="font-sans">
+    <%- include('partials/backdrop') %>
+    <%- include('partials/nav') %>
+
+    <main class="mx-auto w-full max-w-xl px-6 pt-16">
+      <section class="surface animate-rise px-6 py-12 text-center shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
+        <div
+          class="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 text-2xl dark:border-white/10 dark:bg-white/[0.04]"
+          aria-hidden="true"
+        >
+          ⏳
+        </div>
+
+        <h1 class="text-2xl font-bold tracking-tight text-balance">Slow down a moment</h1>
+
+        <p class="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
+          <%= message %>
+        </p>
+
+        <a href="/" class="btn-ghost mt-7">← Back to the start</a>
+      </section>
+    </main>
+
+    <%- include('partials/footer') %>
+  </body>
+</html>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <%- include('partials/head', { title: 'A secret is waiting for you' }) %>
+  </head>
+  <body class="font-sans">
+    <%- include('partials/backdrop') %>
+    <%- include('partials/nav') %>
+
+    <main class="mx-auto w-full max-w-xl px-6 pt-16">
+      <section class="surface animate-rise px-6 py-12 text-center shadow-xl shadow-neutral-900/5 sm:px-10 dark:shadow-black/40">
+        <div class="relative mx-auto mb-7 h-14 w-14" aria-hidden="true">
+          <div class="absolute inset-0 rounded-full bg-gradient-to-br from-amber-400/30 to-orange-600/20 blur-xl animate-flicker"></div>
+          <div class="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-orange-500">
+              <rect x="3" y="11" width="18" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0" />
+            </svg>
+          </div>
+        </div>
+
+        <h1 class="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
+          Someone sent you a <span class="text-gradient">secret</span>
+        </h1>
+
+        <p class="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
+          It can only be opened once. The moment you continue, it is decrypted, shown
+          to you, and permanently deleted from the server.
+        </p>
+
+        <% if (locals.error) { %>
+        <p
+          role="alert"
+          class="mx-auto mt-6 flex max-w-sm items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-left text-sm leading-relaxed text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300"
+        >
+          <span aria-hidden="true">⚠️</span><span><%= error %></span>
+        </p>
+        <% } %>
+
+        <form method="post" action="/s/<%= token %>" data-reveal-form class="mt-8">
+          <!--
+            Always shown, never conditional. The server has no idea whether this
+            token needs a passphrase — it never looks the token up on GET — and
+            asking only when one is required would tell a prober that the secret
+            exists. So the field is offered to everyone and simply ignored when
+            the secret has no passphrase.
+          -->
+          <div class="mx-auto max-w-xs text-left">
+            <label for="passphrase" class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              Passphrase <span class="font-normal">— only if the sender set one</span>
+            </label>
+            <input
+              type="password"
+              id="passphrase"
+              name="passphrase"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="200"
+              placeholder="Leave blank if you weren't given one"
+              class="mt-1.5 w-full rounded-xl border border-neutral-200 bg-white/60 px-3.5 py-2.5 font-mono text-sm text-neutral-800 placeholder:font-sans placeholder:text-neutral-400 dark:border-white/10 dark:bg-black/30 dark:text-neutral-200 dark:placeholder:text-neutral-600"
+            />
+          </div>
+
+          <button type="submit" data-reveal-submit class="btn-primary mt-5 w-full py-3 text-base sm:w-auto sm:px-8">
+            <span data-reveal-label>🔓 Reveal and destroy</span>
+          </button>
+        </form>
+
+        <!--
+          No timestamps or expiry here on purpose. This page is served for every
+          token, real or not, so that fetching it proves nothing about whether a
+          secret is still waiting. Showing "created at" would give that away.
+        -->
+        <p class="mt-8 border-t border-neutral-200/70 pt-6 text-xs leading-relaxed text-neutral-400 dark:border-white/5 dark:text-neutral-600">
+          If this link has already been used or has expired, you'll find that out on
+          the next screen.
+        </p>
+      </section>
+
+      <p class="mx-auto mt-5 max-w-sm text-center text-xs leading-relaxed text-neutral-400 dark:text-neutral-600">
+        Make sure you're ready to copy it — there is no second chance, and no way to
+        ask the server for it again.
+      </p>
+    </main>
+
+    <%- include('partials/footer') %>
+  </body>
+</html>

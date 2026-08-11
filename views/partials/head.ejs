@@ -1,0 +1,44 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+
+<!--
+  This site ships its own light and dark themes, so extensions should not
+  re-tint it. `darkreader-lock` is Dark Reader's official opt-out: it skips the
+  page entirely and lets our theme (and the header toggle) do the work.
+  `color-scheme` tells the browser to render native UI — scrollbars, the expiry
+  dropdown, focus rings, autofill — to match whichever theme is active.
+-->
+<meta name="darkreader-lock" />
+<meta name="color-scheme" content="light dark" />
+
+<title><%= typeof title === 'string' ? title : 'Burn After Reading' %></title>
+<meta name="description" content="Share a password or API key through a link that works exactly once, then destroys itself." />
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#08080a" media="(prefers-color-scheme: dark)" />
+<meta property="og:title" content="🔥 Burn After Reading" />
+<meta property="og:description" content="One-time secret links. Encrypted with AES-256-GCM, deleted on first read." />
+<meta property="og:type" content="website" />
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>" />
+
+<script nonce="<%= nonce %>">
+  // Inline and blocking on purpose: applies the saved theme before first paint
+  // so there is no white flash on a dark-mode load. The nonce is what lets this
+  // through the Content-Security-Policy without opening up 'unsafe-inline'.
+  (function () {
+    try {
+      var saved = localStorage.getItem('theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (!saved && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    } catch (e) {}
+  })();
+</script>
+
+<% const bundle = assets(); %>
+<% bundle.css.forEach(function (href) { %>
+<link rel="stylesheet" href="<%= href %>" />
+<% }); %>
+<script type="module" src="<%= bundle.js %>" defer></script>

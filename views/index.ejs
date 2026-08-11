@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <%- include('partials/head', { title: 'Burn After Reading — one-time secret links' }) %>
+  </head>
+  <body class="font-sans">
+    <%- include('partials/backdrop') %>
+    <%- include('partials/nav') %>
+
+    <main class="mx-auto w-full max-w-3xl px-6">
+      <!-- Hero ---------------------------------------------------------- -->
+      <section class="animate-rise pt-10 pb-12 text-center">
+        <span class="chip mb-6">
+          <span class="relative flex h-1.5 w-1.5">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+          </span>
+          AES-256-GCM · deleted on first read
+        </span>
+
+        <h1 class="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
+          Send a secret that
+          <span class="text-gradient">reads once</span>,
+          then disappears.
+        </h1>
+
+        <p class="mx-auto mt-5 max-w-lg text-base leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
+          A password pasted into a chat thread stays there forever, searchable and
+          synced to every device. Send a link that stops working after one read
+          instead, so the secret doesn't outlive the conversation.
+        </p>
+      </section>
+
+      <!-- Compose ------------------------------------------------------- -->
+      <section data-compose class="animate-rise [animation-delay:80ms]">
+        <form data-secret-form class="surface overflow-hidden shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
+          <label for="message" class="sr-only">Your secret</label>
+          <textarea
+            id="message"
+            name="message"
+            data-message
+            rows="8"
+            maxlength="<%= maxLength %>"
+            spellcheck="false"
+            autocomplete="off"
+            autofocus
+            placeholder="Paste the password, API key, or note you need to share…"
+            class="block w-full resize-none bg-transparent p-5 font-mono text-sm leading-relaxed placeholder:text-neutral-400 focus:outline-none dark:placeholder:text-neutral-600"
+          ></textarea>
+
+          <!-- Character usage -->
+          <div class="mx-5 h-px overflow-hidden rounded-full bg-neutral-200 dark:bg-white/10">
+            <div
+              data-progress
+              class="h-full w-0 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 transition-all duration-300"
+            ></div>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200/70 bg-neutral-100/40 px-4 py-3 dark:border-white/5 dark:bg-white/[0.02]">
+            <div class="flex items-center gap-3">
+              <label for="ttlHours" class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                ⏱ Expires in
+              </label>
+              <select id="ttlHours" name="ttlHours" class="select-clean">
+                <% ttlChoices.forEach(function (hours) { %>
+                <option value="<%= hours %>" <%= hours === 24 ? 'selected' : '' %>>
+                  <%= hours < 24 ? hours + ' hour' : (hours / 24) + ' day' + (hours > 24 ? 's' : '') %>
+                </option>
+                <% }); %>
+              </select>
+              <span data-counter class="font-mono text-xs text-neutral-400 tabular-nums dark:text-neutral-600"></span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <label for="passphrase" class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                🔑 Passphrase
+              </label>
+              <input
+                type="password"
+                id="passphrase"
+                name="passphrase"
+                autocomplete="new-password"
+                spellcheck="false"
+                minlength="4"
+                maxlength="200"
+                placeholder="optional"
+                class="field w-32 font-mono placeholder:font-sans placeholder:text-neutral-400 dark:placeholder:text-neutral-600"
+              />
+            </div>
+
+            <button type="submit" data-submit class="btn-primary">
+              <span data-submit-label>Create secret link</span>
+              <kbd class="hidden rounded border border-white/25 px-1.5 py-0.5 font-mono text-[10px] text-white/80 sm:inline">⌘↵</kbd>
+            </button>
+          </div>
+        </form>
+
+        <p
+          data-error
+          role="alert"
+          class="mt-3 hidden items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300"
+        ></p>
+      </section>
+
+      <!-- Result -------------------------------------------------------- -->
+      <section data-result class="hidden">
+        <div class="surface animate-rise p-6 shadow-xl shadow-neutral-900/5 sm:p-7 dark:shadow-black/40">
+          <div class="flex items-start gap-3">
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-base" aria-hidden="true">✅</span>
+            <div class="min-w-0">
+              <h2 class="text-base font-semibold tracking-tight">Your one-time link is ready</h2>
+              <p class="mt-1 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+                Send it through any channel — link previews can't trigger it. The
+                first person to open and reveal it gets the secret; after that the
+                link is dead. It expires on its own in
+                <span data-expiry class="font-medium text-neutral-700 dark:text-neutral-200">24 hours</span>.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-5 flex flex-col gap-2 sm:flex-row">
+            <input
+              id="secret-link"
+              data-link
+              readonly
+              aria-label="Your one-time secret link"
+              class="min-w-0 flex-1 rounded-xl border border-neutral-200 bg-neutral-100/60 px-3.5 py-3 font-mono text-xs text-neutral-700 dark:border-white/10 dark:bg-black/30 dark:text-neutral-300"
+            />
+            <button type="button" data-copy="#secret-link" class="btn-primary shrink-0">
+              <span data-copy-label>📋 Copy link</span>
+            </button>
+          </div>
+
+          <div class="mt-4 flex items-start gap-2 rounded-xl border border-amber-300/40 bg-amber-50/60 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200/80">
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              This link is shown once. We can't recover it — close the tab and it's gone.
+            </span>
+          </div>
+
+          <div
+            data-passphrase-note
+            class="mt-2 hidden items-start gap-2 rounded-xl border border-emerald-300/40 bg-emerald-50/60 px-3.5 py-2.5 text-xs leading-relaxed text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-200/80"
+          >
+            <span aria-hidden="true">🔑</span>
+            <span>
+              Passphrase set. Send it through a <strong>different channel</strong> than the
+              link — putting both in the same chat defeats the point. Five wrong
+              attempts destroy the secret.
+            </span>
+          </div>
+        </div>
+
+        <button type="button" data-new class="btn-ghost mt-3 w-full">↺ Create another secret</button>
+      </section>
+
+      <!-- How it works -------------------------------------------------- -->
+      <section id="how" class="mt-20 scroll-mt-28">
+        <h2 class="text-center text-xs font-semibold tracking-[0.18em] text-neutral-400 uppercase dark:text-neutral-600">
+          How it works
+        </h2>
+
+        <ol class="mt-8 grid gap-4 sm:grid-cols-3">
+          <%
+            const steps = [
+              { icon: '🔒', title: 'Encrypted', body: 'Your text is sealed with AES-256-GCM before it ever touches the database.' },
+              { icon: '🔗', title: 'Linked', body: 'It gets a random UUID. The link is the only way in, and it is never indexed.' },
+              { icon: '🔥', title: 'Burned', body: 'Revealing it deletes the row in the same query that fetches it. No copies left behind.' }
+            ];
+          %>
+          <% steps.forEach(function (step, i) { %>
+          <li class="surface p-5">
+            <div class="flex items-center gap-2.5">
+              <span class="text-lg" aria-hidden="true"><%= step.icon %></span>
+              <span class="font-mono text-[11px] text-neutral-400 dark:text-neutral-600">0<%= i + 1 %></span>
+            </div>
+            <h3 class="mt-3 text-sm font-semibold"><%= step.title %></h3>
+            <p class="mt-1.5 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+              <%= step.body %>
+            </p>
+          </li>
+          <% }); %>
+        </ol>
+
+        <!-- Stated plainly rather than buried in the README: overselling what the
+             encryption covers is how a tool like this earns misplaced trust. -->
+        <p class="mx-auto mt-6 max-w-lg text-center text-xs leading-relaxed text-pretty text-neutral-400 dark:text-neutral-600">
+          Worth knowing: this isn't zero-knowledge. The decryption key lives on the
+          server, so encryption protects the database — not you from whoever runs it.
+          Self-host it if that matters to you.
+        </p>
+      </section>
+    </main>
+
+    <%- include('partials/footer') %>
+  </body>
+</html>
