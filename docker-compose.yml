@@ -1,0 +1,71 @@
+# Run the whole thing with:
+#
+#   docker compose up -d --build
+#
+# Compose reads ./.env automatically for the ${...} substitutions below, so the
+# same file that configures `npm run dev` configures the container.
+#
+#   docker compose logs -f     follow the logs
+#   docker compose down        stop (the volume, and your secrets, survive)
+#   docker compose down -v     stop and delete the database as well
+
+services:
+  app:
+    build: .
+    image: burn-after-reading
+    restart: unless-stopped
+
+    ports:
+      - '${PORT:-3000}:3000'
+
+    environment:
+      # The one required value. Compose fails fast with this message rather than
+      # starting a container that dies on boot.
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env — generate one with "npm run keygen"}
+      SECRET_KEY_PREVIOUS: ${SECRET_KEY_PREVIOUS:-}
+
+      # Must be the address people actually reach, or every generated link is wrong.
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+
+      # Inside the container the app always listens on 3000; the host port is
+      # mapped above. Overriding this here would break the healthcheck.
+      PORT: 3000
+
+      # Absolute, and inside the mounted volume.
+      DATABASE_PATH: /app/data/app.db
+
+      # Leave at 0 unless a reverse proxy really is in front — see README.
+      TRUST_PROXY: ${TRUST_PROXY:-}
+
+      MAX_SECRETS: ${MAX_SECRETS:-}
+      REPO_URL: ${REPO_URL:-}
+      LOG_REQUESTS: ${LOG_REQUESTS:-}
+      # json suits `docker compose logs` being piped into an aggregator.
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+
+      NODE_ENV: production
+
+    volumes:
+      # SQLite lives here. Without this the database — and every unread secret —
+      # is destroyed each time the container is replaced.
+      - secrets-data:/app/data
+
+    # The image already declares a HEALTHCHECK against /healthz; this only makes
+    # the timings explicit so `docker compose ps` reports health promptly.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Node handles SIGTERM itself and needs a moment to drain connections and
+    # checkpoint SQLite. The default 10s grace matches the app's own timeout.
+    stop_grace_period: 15s
+
+volumes:
+  secrets-data:

@@ -1,0 +1,21 @@
+# Rebuilt inside the image — copying the host's would break the native module.
+node_modules
+public/dist
+
+# Never bake secrets or a local database into an image.
+.env
+.env.local
+data
+*.db
+*.db-shm
+*.db-wal
+
+.git
+.github
+.claude
+test
+dev_docs.md
+README.md
+Dockerfile
+.dockerignore
+npm-debug.log*
