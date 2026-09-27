@@ -58,7 +58,10 @@ export function requestLogger(req, res, next) {
 
   res.on('finish', () => {
     const ms = Number(process.hrtime.bigint() - startedAt) / 1e6;
-    const path = redactPath(req.path);
+    // originalUrl, not path: a mounted handler such as express.static('/dist')
+    // strips its prefix from req.path, so bundle requests logged as /assets/….
+    // The query string is dropped; nothing in this app puts data there.
+    const path = redactPath(req.originalUrl.split('?')[0]);
     const status = res.statusCode;
 
     // 5xx is ours to fix, 4xx is worth noticing, everything else is routine.
