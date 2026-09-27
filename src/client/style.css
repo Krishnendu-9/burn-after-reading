@@ -25,18 +25,69 @@
     color-scheme: dark;
   }
 
+  /*
+   * Every page is nav · main · footer. The body is at least one screen tall and
+   * main takes up the slack, so a short page (reveal, destroyed) ends with its
+   * footer at the bottom of the window — no scrollbar, no empty strip below.
+   * `relative` is the box the backdrop partial fills and clips to.
+   */
+  body {
+    @apply relative flex min-h-screen flex-col;
+    min-height: 100dvh; /* mobile browsers: excludes the collapsing URL bar */
+  }
+
+  body > main {
+    flex: 1 0 auto;
+  }
+
   body {
     @apply bg-neutral-50 text-neutral-900 antialiased;
     @apply dark:bg-[#08080a] dark:text-neutral-100;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
   }
 
+  /*
+   * Written out rather than with `dark:`. That variant appends :where(.dark …)
+   * after the pseudo-element, and "::selection:where(…)" is invalid, so the
+   * browser dropped the dark rule and selected text stayed near-black on the
+   * dark page.
+   */
   ::selection {
-    @apply bg-amber-400/30 text-neutral-900 dark:text-amber-50;
+    background-color: rgb(251 191 36 / 0.3); /* amber-400 / 30% */
+    color: #171717; /* neutral-900 */
+  }
+
+  .dark ::selection {
+    background-color: rgb(251 191 36 / 0.35);
+    color: #fffbeb; /* amber-50 */
   }
 
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-amber-500;
+  }
+
+  /*
+   * Native <select> popups. Chrome and Firefox on Windows and Linux paint the
+   * option list from the select's own colours, and ours are a near-transparent
+   * fill with light text — so in dark mode the list came out as pale grey on
+   * white. Options get solid colours per theme instead, and the select opts
+   * into the dark scheme so the popup chrome (scrollbar, borders) matches too.
+   * macOS ignores option styling and draws its own menu from color-scheme.
+   * Plain hex rather than the theme's oklch values: the popup is drawn by the
+   * browser outside the page, where older engines don't all resolve oklch.
+   */
+  select option {
+    background-color: #ffffff; /* white */
+    color: #171717; /* neutral-900 */
+  }
+
+  .dark select {
+    color-scheme: dark;
+  }
+
+  .dark select option {
+    background-color: #171717; /* neutral-900 */
+    color: #f5f5f5; /* neutral-100 */
   }
 
   /* Firefox */
@@ -100,6 +151,17 @@
          shadow-lg shadow-orange-600/25
          hover:from-amber-400 hover:to-orange-500 hover:shadow-orange-600/40
          active:scale-[0.98];
+  /* A faded orange reads as broken, especially on dark; a flat neutral fill
+     reads as "not ready yet". */
+  @apply disabled:bg-none disabled:bg-neutral-200 disabled:text-neutral-500
+         disabled:opacity-100 disabled:shadow-none
+         dark:disabled:bg-white/[0.06] dark:disabled:text-neutral-500;
+}
+
+/* Keyboard hint inside a button, e.g. "Ctrl ↵". */
+@utility kbd {
+  @apply rounded border border-current/25 px-1.5 py-0.5 font-mono text-[10px] leading-none
+         opacity-80;
 }
 
 @utility btn-ghost {
@@ -197,6 +259,12 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Controls that do nothing without JavaScript. `js` is set on <html> by the
+   inline script in head.ejs before first paint, so there is no pop-in. */
+html:not(.js) [data-requires-js] {
+  display: none !important;
 }
 
 /* Applied by JS, so a no-JS visitor still sees their (already burned) secret. */

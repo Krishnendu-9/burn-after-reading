@@ -31,6 +31,7 @@ try {
   app = createApp({
     baseUrl: BASE_URL,
     repoUrl: envString('REPO_URL'),
+    authorName: envString('AUTHOR_NAME'),
     trustProxy,
     logRequests: envFlag('LOG_REQUESTS', true)
   });

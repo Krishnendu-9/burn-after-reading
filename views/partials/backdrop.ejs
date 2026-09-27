@@ -1,10 +1,21 @@
-<!-- Ambient background: warm glow at the top, faint grid fading toward the edges. -->
-<div class="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-  <div
-    class="absolute -top-64 left-1/2 h-[38rem] w-[64rem] -translate-x-1/2 rounded-full bg-gradient-to-br from-amber-400/20 via-orange-500/10 to-transparent blur-3xl animate-flicker dark:from-amber-500/15 dark:via-orange-600/8"
-  ></div>
-  <div
-    class="absolute -bottom-64 -left-40 h-[32rem] w-[32rem] rounded-full bg-gradient-to-tr from-rose-400/10 to-transparent blur-3xl"
-  ></div>
-  <div class="absolute inset-0 bg-grid text-neutral-900 dark:text-white"></div>
+<!--
+  Ambient background: warm glow behind the hero, faint grid fading toward the
+  edges.
+
+  Absolute rather than fixed: a fixed layer is cut off at the viewport edge in
+  any full-page capture, which drew a hard seam across the page, and frosted
+  surfaces sampled it differently above and below that line.
+
+  The outer layer fills the body (which is `relative`) and clips; the inner one
+  carries the fixed 64rem height. Without the clip, that height counted as page
+  content, so every page shorter than 64rem was stretched to it — a scrollbar
+  and empty space below the footer on the short pages.
+-->
+<div class="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
+  <div class="absolute inset-x-0 top-0 h-[64rem]">
+    <div
+      class="absolute -top-72 left-1/2 h-[40rem] w-[64rem] -translate-x-1/2 rounded-full bg-gradient-to-br from-amber-400/20 via-orange-500/10 to-transparent blur-3xl animate-flicker dark:from-amber-500/15 dark:via-orange-600/8"
+    ></div>
+    <div class="absolute inset-0 bg-grid text-neutral-900 dark:text-white"></div>
+  </div>
 </div>

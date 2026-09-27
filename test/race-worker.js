@@ -20,8 +20,8 @@ let error = null;
 
 try {
   // No passphrase in play here — the unseal step just hands the payload back, so
-  // the test measures the transaction, not the crypto.
-  won = burnSecret(workerData.token, (row) => row.payload).status === 'ok';
+  // the test measures the read-then-delete, not the crypto.
+  won = (await burnSecret(workerData.token, (row) => row.payload)).status === 'ok';
 } catch (thrown) {
   error = thrown.message;
 }

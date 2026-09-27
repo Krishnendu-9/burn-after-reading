@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
+
+const scrypt = promisify(crypto.scrypt);
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // 96-bit nonce, the recommended size for GCM
@@ -125,8 +128,14 @@ const SALT_LENGTH = 16;
 // list. N=16384, r=8 needs ~16MB, comfortably inside Node's default maxmem.
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1 };
 
+/**
+ * Async on purpose. scryptSync would hold the event loop for the full ~100ms,
+ * so a burst of wrong-passphrase guesses spread across many addresses — each
+ * one inside its own rate limit — would stall every other request on the
+ * server. The async form runs on libuv's thread pool instead.
+ */
 function deriveKey(passphrase, salt) {
-  return crypto.scryptSync(String(passphrase).normalize('NFKC'), salt, 32, SCRYPT_PARAMS);
+  return scrypt(String(passphrase).normalize('NFKC'), salt, 32, SCRYPT_PARAMS);
 }
 
 /**
@@ -137,11 +146,11 @@ function deriveKey(passphrase, salt) {
  * operator can no longer read it: holding SECRET_KEY unwraps the outer layer and
  * yields nothing but the inner ciphertext.
  *
- * @returns {string} A normal payload whose plaintext is "salt:iv:authTag:ciphertext".
+ * @returns {Promise<string>} A normal payload whose plaintext is "salt:iv:authTag:ciphertext".
  */
-export function encryptWithPassphrase(plaintext, passphrase) {
+export async function encryptWithPassphrase(plaintext, passphrase) {
   const salt = crypto.randomBytes(SALT_LENGTH);
-  const key = deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt);
 
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv, {
@@ -161,17 +170,27 @@ export function encryptWithPassphrase(plaintext, passphrase) {
 }
 
 /**
- * Reverses encryptWithPassphrase(). Throws on the wrong passphrase — the GCM tag
+ * Removes the passphrase layer from what decrypt() returned for a
+ * passphrase-protected payload. Rejects on the wrong passphrase — the GCM tag
  * makes that a definite answer rather than a guess, and the caller relies on the
- * throw to decide *not* to destroy the secret.
+ * rejection to decide *not* to destroy the secret.
+ *
+ * Kept separate from the server layer so a caller can tell the two failures
+ * apart: a wrong passphrase is the reader's mistake, a server-layer failure
+ * never is.
  */
-export function decryptWithPassphrase(payload, passphrase) {
-  const inner = decrypt(payload).split(':');
-  if (inner.length !== 4) {
+export async function openPassphraseLayer(inner, passphrase) {
+  const parts = String(inner).split(':');
+  if (parts.length !== 4) {
     throw new Error('Malformed passphrase payload');
   }
 
-  const [salt, iv, authTag, ciphertext] = inner.map((part) => Buffer.from(part, 'hex'));
+  const [salt, iv, authTag, ciphertext] = parts.map((part) => Buffer.from(part, 'hex'));
 
-  return decryptWith(deriveKey(passphrase, salt), iv, authTag, ciphertext);
+  return decryptWith(await deriveKey(passphrase, salt), iv, authTag, ciphertext);
+}
+
+/** Reverses encryptWithPassphrase(): the server layer, then the passphrase layer. */
+export async function decryptWithPassphrase(payload, passphrase) {
+  return openPassphraseLayer(decrypt(payload), passphrase);
 }

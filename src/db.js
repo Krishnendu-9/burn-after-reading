@@ -16,8 +16,8 @@ export const db = new Database(DB_PATH);
 
 // WAL keeps reads from blocking the write that burns a secret.
 db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
 
+// `token` needs no index of its own: UNIQUE already creates one.
 db.exec(`
   CREATE TABLE IF NOT EXISTS secrets (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,21 +27,30 @@ db.exec(`
     expires_at  TEXT    NOT NULL
   );
 
-  CREATE INDEX IF NOT EXISTS idx_secrets_token ON secrets (token);
   CREATE INDEX IF NOT EXISTS idx_secrets_expires_at ON secrets (expires_at);
+
+  -- Older databases carry a second, redundant index on token.
+  DROP INDEX IF EXISTS idx_secrets_token;
 `);
 
-// Additive migrations for databases created before passphrases existed. SQLite
-// has no "ADD COLUMN IF NOT EXISTS", so check what is already there.
+// Additive migrations for databases created before these columns existed.
+// SQLite has no "ADD COLUMN IF NOT EXISTS", so check what is already there.
 const existingColumns = new Set(
   db.prepare('PRAGMA table_info(secrets)').all().map((column) => column.name)
 );
 
-if (!existingColumns.has('requires_passphrase')) {
-  db.exec('ALTER TABLE secrets ADD COLUMN requires_passphrase INTEGER NOT NULL DEFAULT 0');
-}
-if (!existingColumns.has('attempts')) {
-  db.exec('ALTER TABLE secrets ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+const addedColumns = {
+  requires_passphrase: 'INTEGER NOT NULL DEFAULT 0',
+  attempts: 'INTEGER NOT NULL DEFAULT 0',
+  // 1 when the browser encrypted the message before sending it, so the stored
+  // payload wraps ciphertext the server holds no key for.
+  client_encrypted: 'INTEGER NOT NULL DEFAULT 0'
+};
+
+for (const [name, definition] of Object.entries(addedColumns)) {
+  if (!existingColumns.has(name)) {
+    db.exec(`ALTER TABLE secrets ADD COLUMN ${name} ${definition}`);
+  }
 }
 
 /**
@@ -55,12 +64,16 @@ export const MAX_PASSPHRASE_ATTEMPTS = 5;
 
 const statements = {
   insert: db.prepare(`
-    INSERT INTO secrets (token, payload, expires_at, requires_passphrase)
-    VALUES (@token, @payload, datetime('now', @ttl), @requiresPassphrase)
+    INSERT INTO secrets (token, payload, expires_at, requires_passphrase, client_encrypted)
+    VALUES (@token, @payload, datetime('now', @ttl), @requiresPassphrase, @clientEncrypted)
   `),
   selectForBurn: db.prepare(`
-    SELECT payload, created_at, requires_passphrase, attempts
+    SELECT payload, created_at, requires_passphrase, client_encrypted, attempts
     FROM secrets
+    WHERE token = ? AND expires_at > datetime('now')
+  `),
+  consume: db.prepare(`
+    DELETE FROM secrets
     WHERE token = ? AND expires_at > datetime('now')
   `),
   deleteByToken: db.prepare('DELETE FROM secrets WHERE token = ?'),
@@ -77,62 +90,108 @@ const statements = {
 
 /**
  * Store an encrypted payload under a token.
- * @param {{ token: string, payload: string, ttlHours: number }} secret
+ * @param {{ token: string, payload: string, ttlHours: number,
+ *           requiresPassphrase?: boolean, clientEncrypted?: boolean }} secret
  */
-export function createSecret({ token, payload, ttlHours, requiresPassphrase = false }) {
+export function createSecret({
+  token,
+  payload,
+  ttlHours,
+  requiresPassphrase = false,
+  clientEncrypted = false
+}) {
   statements.insert.run({
     token,
     payload,
     ttl: `+${ttlHours} hours`,
-    requiresPassphrase: requiresPassphrase ? 1 : 0
+    requiresPassphrase: requiresPassphrase ? 1 : 0,
+    clientEncrypted: clientEncrypted ? 1 : 0
   });
 }
 
 /**
- * Fetch, unseal and destroy a secret — all inside one immediate transaction.
+ * Counts one wrong passphrase, destroying the secret on the last allowed one.
  *
- * The whole guarantee of this app lives in this function. `BEGIN IMMEDIATE` takes
- * the write lock before reading, so two callers arriving together are serialised
- * rather than both reading the row and both being handed the plaintext. (A
- * deferred transaction would not do: both would read, then one would fail on
- * upgrade.)
+ * Read-then-write, so it runs as an immediate transaction: the write lock is
+ * taken before the read, and two wrong guesses arriving together are counted as
+ * two rather than both reading the same count and both writing count+1.
+ */
+const recordFailedAttempt = db.transaction((token) => {
+  const row = statements.selectForBurn.get(token);
+  if (!row) return { status: 'missing' };
+
+  const used = row.attempts + 1;
+
+  if (used >= MAX_PASSPHRASE_ATTEMPTS) {
+    statements.deleteByToken.run(token);
+    return { status: 'exhausted' };
+  }
+
+  statements.bumpAttempts.run(token);
+  return { status: 'locked', attemptsLeft: MAX_PASSPHRASE_ATTEMPTS - used };
+});
+
+/**
+ * Thrown by an `unseal` callback when the server itself can't open a row — its
+ * key has changed without rotation, or the stored payload is damaged. That is
+ * never the reader's fault, so it must not cost a passphrase attempt, and the
+ * row is kept: restoring the key (SECRET_KEY_PREVIOUS) makes it readable again.
+ */
+export class UnreadableSecretError extends Error {
+  constructor(cause) {
+    super('The server could not decrypt this secret', { cause });
+    this.name = 'UnreadableSecretError';
+  }
+}
+
+/**
+ * Fetch, unseal and destroy a secret, handing the plaintext to exactly one caller.
  *
- * `unseal` is run inside the transaction and decides the outcome. If it throws —
- * a wrong passphrase — the row is kept and the attempt counted, so a typo does
- * not destroy the secret. Only a successful unseal deletes.
+ * The whole guarantee of this app lives in this function. Any number of callers
+ * may read the row and unseal it at the same moment — unsealing is async, since
+ * scrypt runs on the thread pool, so a lock cannot be held across it. What
+ * decides the winner is the DELETE afterwards: SQLite executes it atomically, so
+ * it removes the row for exactly one caller. Only that caller is given the
+ * message; every other one sees `missing`, as if it had arrived after the burn.
+ *
+ * The naive version — return the message because the SELECT found a row —
+ * hands the same secret to every concurrent reader. The race test catches that.
+ *
+ * `unseal` decides the outcome. If it throws — a wrong passphrase — the row is
+ * kept and the attempt counted, so a typo does not destroy the secret. If it
+ * throws UnreadableSecretError, the row is kept and nothing is counted. Only a
+ * successful unseal deletes.
  *
  * @param {string} token
- * @param {(row: { payload: string, requires_passphrase: number }) => string} unseal
- * @returns {{ status: 'ok', message: string, createdAt: string }
+ * @param {(row: { payload: string, requires_passphrase: number }) => string | Promise<string>} unseal
+ * @returns {Promise<{ status: 'ok', message: string, createdAt: string, clientEncrypted: boolean }
  *          | { status: 'missing' }
+ *          | { status: 'unreadable' }
  *          | { status: 'exhausted' }
- *          | { status: 'locked', attemptsLeft: number }}
+ *          | { status: 'locked', attemptsLeft: number }>}
  */
-export function burnSecret(token, unseal) {
-  const run = db.transaction(() => {
-    const row = statements.selectForBurn.get(token);
-    if (!row) return { status: 'missing' };
+export async function burnSecret(token, unseal) {
+  const row = statements.selectForBurn.get(token);
+  if (!row) return { status: 'missing' };
 
-    let message;
-    try {
-      message = unseal(row);
-    } catch {
-      const used = row.attempts + 1;
+  let message;
+  try {
+    message = await unseal(row);
+  } catch (error) {
+    if (error instanceof UnreadableSecretError) return { status: 'unreadable' };
+    return recordFailedAttempt.immediate(token);
+  }
 
-      if (used >= MAX_PASSPHRASE_ATTEMPTS) {
-        statements.deleteByToken.run(token);
-        return { status: 'exhausted' };
-      }
+  if (statements.consume.run(token).changes !== 1) {
+    return { status: 'missing' };
+  }
 
-      statements.bumpAttempts.run(token);
-      return { status: 'locked', attemptsLeft: MAX_PASSPHRASE_ATTEMPTS - used };
-    }
-
-    statements.deleteByToken.run(token);
-    return { status: 'ok', message, createdAt: row.created_at };
-  });
-
-  return run.immediate();
+  return {
+    status: 'ok',
+    message,
+    createdAt: row.created_at,
+    clientEncrypted: row.client_encrypted === 1
+  };
 }
 
 /**

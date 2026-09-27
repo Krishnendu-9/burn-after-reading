@@ -39,6 +39,7 @@ services:
 
       MAX_SECRETS: ${MAX_SECRETS:-}
       REPO_URL: ${REPO_URL:-}
+      AUTHOR_NAME: ${AUTHOR_NAME:-}
       LOG_REQUESTS: ${LOG_REQUESTS:-}
       # json suits `docker compose logs` being piped into an aggregator.
       LOG_FORMAT: ${LOG_FORMAT:-json}

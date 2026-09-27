@@ -5,193 +5,370 @@
   </head>
   <body class="font-sans">
     <%- include('partials/backdrop') %>
-    <%- include('partials/nav') %>
+    <%- include('partials/nav', { home: true }) %>
 
-    <main class="mx-auto w-full max-w-3xl px-6">
+    <main class="mx-auto w-full max-w-6xl px-5 sm:px-6 lg:px-8">
+      <!--
+        Top of the page. One column on phones, tablets and small laptops — pitch,
+        form, guarantees, in that order. From xl up it splits into two equal
+        columns: pitch and guarantees on the left, the form on the right spanning
+        both rows and stretched to their full height (its textarea takes up the
+        slack), so the two sides line up top and bottom. It waits for xl: at
+        1024px the left column was too narrow and the headline broke into five
+        lines.
+      -->
+      <div class="mx-auto grid max-w-3xl pt-10 xl:max-w-none xl:grid-cols-2 xl:gap-x-16 xl:pt-20">
       <!-- Hero ---------------------------------------------------------- -->
-      <section class="animate-rise pt-10 pb-12 text-center">
+      <section class="animate-rise pb-10 text-center sm:pb-12 xl:col-start-1 xl:row-start-1 xl:self-end xl:pb-0 xl:text-left">
         <span class="chip mb-6">
           <span class="relative flex h-1.5 w-1.5">
             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
             <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
           </span>
-          AES-256-GCM · deleted on first read
+          End-to-end encrypted · deleted on first read
         </span>
 
-        <h1 class="text-4xl font-bold tracking-tight text-balance sm:text-5xl">
-          Send a secret that
-          <span class="text-gradient">reads once</span>,
+        <!-- nowrap keeps the highlighted phrase whole; split across lines, the
+             gradient broke mid-phrase. -->
+        <h1 class="text-4xl font-bold tracking-tight text-balance sm:text-5xl xl:text-[3.4rem] xl:leading-[1.08]">
+          Send a secret that <span class="text-gradient whitespace-nowrap">reads once</span>,
           then disappears.
         </h1>
 
-        <p class="mx-auto mt-5 max-w-lg text-base leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
+        <p class="mx-auto mt-5 max-w-lg text-base leading-relaxed text-pretty text-neutral-600 xl:mx-0 xl:text-lg dark:text-neutral-400">
           A password pasted into a chat thread stays there forever, searchable and
           synced to every device. Send a link that stops working after one read
           instead, so the secret doesn't outlive the conversation.
         </p>
       </section>
 
+      <!-- Form column: compose, swapped for the result once a link exists. -->
+      <div class="xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:flex xl:flex-col">
       <!-- Compose ------------------------------------------------------- -->
-      <section data-compose class="animate-rise [animation-delay:80ms]">
-        <form data-secret-form class="surface overflow-hidden shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
-          <label for="message" class="sr-only">Your secret</label>
-          <textarea
-            id="message"
-            name="message"
-            data-message
-            rows="8"
-            maxlength="<%= maxLength %>"
-            spellcheck="false"
-            autocomplete="off"
-            autofocus
-            placeholder="Paste the password, API key, or note you need to share…"
-            class="block w-full resize-none bg-transparent p-5 font-mono text-sm leading-relaxed placeholder:text-neutral-400 focus:outline-none dark:placeholder:text-neutral-600"
-          ></textarea>
+      <section data-compose class="animate-rise [animation-delay:80ms] xl:flex xl:flex-1 xl:flex-col">
+        <!-- @container: the toolbar lays itself out by the form's own width,
+             which differs between the full-width and the right-column layouts.
+
+             This form is only ever submitted by main.js, which encrypts first.
+             Without JavaScript it must never submit on its own: a form with no
+             method defaults to GET, which put the plaintext in the address bar
+             (/?message=…) — browser history and proxy logs. So the button
+             starts disabled (main.js enables it) and the method is POST as a
+             second line of defence; a POST here reaches no route and stores
+             nothing. -->
+        <form data-secret-form method="post" action="/" class="@container surface overflow-hidden xl:flex xl:flex-1 xl:flex-col shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
+          <div class="relative xl:flex xl:flex-1 xl:flex-col">
+            <label for="message" class="sr-only">Your secret</label>
+            <!-- Starts compact and grows with its content (main.js), up to a cap. -->
+            <textarea
+              id="message"
+              name="message"
+              data-message
+              rows="5"
+              maxlength="<%= maxLength %>"
+              spellcheck="false"
+              autocomplete="off"
+              autofocus
+              placeholder="Paste the password, API key, or note you need to share…"
+              class="block max-h-[28rem] min-h-40 w-full resize-none bg-transparent xl:max-h-none xl:flex-1 px-5 pt-5 pb-10 font-mono text-sm leading-relaxed placeholder:text-neutral-500 focus:outline-none"
+            ></textarea>
+            <span
+              data-counter
+              class="pointer-events-none absolute right-4 bottom-3 font-mono text-[11px] text-neutral-500 tabular-nums transition-colors dark:text-neutral-400 data-near-limit:text-amber-600 dark:data-near-limit:text-amber-400"
+            ></span>
+          </div>
 
           <!-- Character usage -->
-          <div class="mx-5 h-px overflow-hidden rounded-full bg-neutral-200 dark:bg-white/10">
+          <div class="h-px bg-neutral-200 dark:bg-white/10">
             <div
               data-progress
-              class="h-full w-0 rounded-full bg-gradient-to-r from-amber-500 to-orange-600 transition-all duration-300"
+              class="h-full w-0 bg-gradient-to-r from-amber-500 to-orange-600 transition-all duration-300"
             ></div>
           </div>
 
-          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200/70 bg-neutral-100/40 px-4 py-3 dark:border-white/5 dark:bg-white/[0.02]">
-            <div class="flex items-center gap-3">
-              <label for="ttlHours" class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                ⏱ Expires in
-              </label>
-              <select id="ttlHours" name="ttlHours" class="select-clean">
-                <% ttlChoices.forEach(function (hours) { %>
-                <option value="<%= hours %>" <%= hours === 24 ? 'selected' : '' %>>
-                  <%= hours < 24 ? hours + ' hour' : (hours / 24) + ' day' + (hours > 24 ? 's' : '') %>
-                </option>
-                <% }); %>
-              </select>
-              <span data-counter class="font-mono text-xs text-neutral-400 tabular-nums dark:text-neutral-600"></span>
+          <div class="bg-neutral-100/50 px-4 pt-3.5 pb-3 dark:bg-white/[0.02]">
+            <!-- By the form's own width: stacked when narrow (phones); expiry and
+                 passphrase side by side over a full-width button in the desktop
+                 right column; one row when the form spans the page (tablets). -->
+            <div class="grid gap-3 @md:grid-cols-[auto_minmax(0,1fr)] @md:items-center @2xl:flex">
+
+              <div class="flex items-center gap-2">
+                <label for="ttlHours" class="flex items-center gap-1.5 text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                  <%- include('partials/icon', { icon: 'clock', cls: 'h-3.5 w-3.5' }) %>
+                  Expires in
+                </label>
+                <select id="ttlHours" name="ttlHours" class="select-clean h-9">
+                  <% ttlChoices.forEach(function (hours) { %>
+                  <option value="<%= hours %>" <%= hours === defaultTtlHours ? 'selected' : '' %>>
+                    <%= hours < 24 ? hours + ' hour' : (hours / 24) + ' day' + (hours > 24 ? 's' : '') %>
+                  </option>
+                  <% }); %>
+                </select>
+              </div>
+
+              <div data-passphrase-field class="relative @2xl:w-60">
+                <label for="passphrase" class="sr-only">Passphrase (optional)</label>
+                <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-neutral-500">
+                  <%- include('partials/icon', { icon: 'key', cls: 'h-3.5 w-3.5' }) %>
+                </span>
+                <input
+                  type="password"
+                  id="passphrase"
+                  name="passphrase"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  minlength="<%= passphraseLength.min %>"
+                  maxlength="<%= passphraseLength.max %>"
+                  placeholder="Passphrase (optional)"
+                  aria-describedby="passphrase-hint"
+                  class="field h-9 w-full pr-9 pl-8 font-mono placeholder:font-sans placeholder:text-neutral-500"
+                />
+                <button
+                  type="button"
+                  data-toggle-passphrase
+                  data-requires-js
+                  aria-label="Show passphrase"
+                  aria-pressed="false"
+                  class="absolute top-1/2 right-1 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-neutral-500 transition hover:text-neutral-800 dark:hover:text-neutral-200"
+                >
+                  <%- include('partials/icon', { icon: 'eye', cls: 'h-4 w-4', attrs: 'data-eye' }) %>
+                  <%- include('partials/icon', { icon: 'eyeOff', cls: 'hidden h-4 w-4', attrs: 'data-eye-off' }) %>
+                </button>
+              </div>
+
+              <button type="submit" data-submit disabled class="btn-primary h-9 w-full @md:col-span-2 @2xl:ml-auto @2xl:w-auto">
+                <span data-submit-label>Create secret link</span>
+                <!-- main.js swaps in ⌘ on Apple devices. -->
+                <kbd data-shortcut class="kbd hidden sm:inline">Ctrl ↵</kbd>
+              </button>
             </div>
 
-            <div class="flex items-center gap-2">
-              <label for="passphrase" class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                🔑 Passphrase
-              </label>
-              <input
-                type="password"
-                id="passphrase"
-                name="passphrase"
-                autocomplete="new-password"
-                spellcheck="false"
-                minlength="4"
-                maxlength="200"
-                placeholder="optional"
-                class="field w-32 font-mono placeholder:font-sans placeholder:text-neutral-400 dark:placeholder:text-neutral-600"
-              />
-            </div>
+            <p id="passphrase-hint" class="mt-2.5 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400">
+              A passphrase is optional. If you set one, the recipient needs it too — send
+              it separately from the link.
+            </p>
 
-            <button type="submit" data-submit class="btn-primary">
-              <span data-submit-label>Create secret link</span>
-              <kbd class="hidden rounded border border-white/25 px-1.5 py-0.5 font-mono text-[10px] text-white/80 sm:inline">⌘↵</kbd>
-            </button>
+            <noscript>
+              <p class="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/50 bg-amber-50/70 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200/90">
+                <%- include('partials/icon', { icon: 'alert', cls: 'mt-px h-3.5 w-3.5' }) %>
+                <span>
+                  Creating a secret needs JavaScript — your message is encrypted in
+                  this browser before it's sent. Turn JavaScript on to continue.
+                </span>
+              </p>
+            </noscript>
           </div>
         </form>
 
-        <p
-          data-error
-          role="alert"
-          class="mt-3 hidden items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300"
-        ></p>
+        <div data-error role="alert" class="hidden">
+          <div class="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+            <%- include('partials/icon', { icon: 'alert', cls: 'mt-0.5 h-4 w-4' }) %>
+            <span data-error-text></span>
+          </div>
+        </div>
       </section>
 
       <!-- Result -------------------------------------------------------- -->
-      <section data-result class="hidden">
-        <div class="surface animate-rise p-6 shadow-xl shadow-neutral-900/5 sm:p-7 dark:shadow-black/40">
+      <section data-result hidden class="xl:flex xl:flex-1 xl:flex-col">
+        <div class="surface animate-rise p-6 xl:flex xl:flex-1 xl:flex-col xl:justify-center shadow-xl shadow-neutral-900/5 sm:p-7 dark:shadow-black/40">
           <div class="flex items-start gap-3">
-            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-base" aria-hidden="true">✅</span>
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <%- include('partials/icon', { icon: 'checkCircle', cls: 'h-5 w-5' }) %>
+            </span>
             <div class="min-w-0">
               <h2 class="text-base font-semibold tracking-tight">Your one-time link is ready</h2>
-              <p class="mt-1 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+              <p class="mt-1 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
                 Send it through any channel — link previews can't trigger it. The
                 first person to open and reveal it gets the secret; after that the
                 link is dead. It expires on its own in
-                <span data-expiry class="font-medium text-neutral-700 dark:text-neutral-200">24 hours</span>.
+                <span data-expiry class="font-medium text-neutral-800 dark:text-neutral-200">24 hours</span>.
               </p>
             </div>
           </div>
 
-          <div class="mt-5 flex flex-col gap-2 sm:flex-row">
-            <input
+          <!-- A wrapping textarea rather than an input: the link runs past 100
+               characters with its key, and a single line cut it off, hiding
+               the very part that matters. main.js sizes it to fit. -->
+          <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <textarea
               id="secret-link"
               data-link
               readonly
+              rows="2"
+              spellcheck="false"
               aria-label="Your one-time secret link"
-              class="min-w-0 flex-1 rounded-xl border border-neutral-200 bg-neutral-100/60 px-3.5 py-3 font-mono text-xs text-neutral-700 dark:border-white/10 dark:bg-black/30 dark:text-neutral-300"
-            />
+              class="block w-full min-w-0 resize-none overflow-hidden rounded-xl sm:flex-1 border border-neutral-200 bg-neutral-100/60 px-3.5 py-2.5 font-mono text-xs leading-relaxed break-all text-neutral-800 focus:outline-none focus-visible:outline-2 focus-visible:outline-amber-500 dark:border-white/10 dark:bg-black/30 dark:text-neutral-200"
+            ></textarea>
             <button type="button" data-copy="#secret-link" class="btn-primary shrink-0">
-              <span data-copy-label>📋 Copy link</span>
+              <%- include('partials/icon', { icon: 'copy', attrs: 'data-copy-icon' }) %>
+              <%- include('partials/icon', { icon: 'check', cls: 'hidden h-4 w-4', attrs: 'data-copied-icon' }) %>
+              <span data-copy-label>Copy link</span>
             </button>
           </div>
 
-          <div class="mt-4 flex items-start gap-2 rounded-xl border border-amber-300/40 bg-amber-50/60 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200/80">
-            <span aria-hidden="true">⚠️</span>
-            <span>
-              This link is shown once. We can't recover it — close the tab and it's gone.
-            </span>
+          <div class="mt-4 flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-50/70 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200/90">
+            <%- include('partials/icon', { icon: 'alert', cls: 'mt-px h-3.5 w-3.5' }) %>
+            <span>This link is shown once. We can't recover it — close the tab and it's gone.</span>
           </div>
 
-          <div
-            data-passphrase-note
-            class="mt-2 hidden items-start gap-2 rounded-xl border border-emerald-300/40 bg-emerald-50/60 px-3.5 py-2.5 text-xs leading-relaxed text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-200/80"
-          >
-            <span aria-hidden="true">🔑</span>
-            <span>
-              Passphrase set. Send it through a <strong>different channel</strong> than the
-              link — putting both in the same chat defeats the point. Five wrong
-              attempts destroy the secret.
-            </span>
+          <div data-passphrase-note class="hidden">
+            <div class="mt-2 flex items-start gap-2 rounded-xl border border-emerald-300/50 bg-emerald-50/70 px-3.5 py-2.5 text-xs leading-relaxed text-emerald-800 dark:border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-200/90">
+              <%- include('partials/icon', { icon: 'key', cls: 'mt-px h-3.5 w-3.5' }) %>
+              <span>
+                Passphrase set. Send it through a <strong>different channel</strong> than the
+                link — putting both in the same chat defeats the point. Five wrong
+                attempts destroy the secret.
+              </span>
+            </div>
+          </div>
+
+          <!-- Shown only when this browser could not encrypt locally (WebCrypto
+               needs HTTPS), so the claim on this page is never overstated. -->
+          <div data-e2e-note class="hidden">
+            <div class="mt-2 flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-50/70 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200/90">
+              <%- include('partials/icon', { icon: 'info', cls: 'mt-px h-3.5 w-3.5' }) %>
+              <span>
+                This browser couldn't encrypt locally — that needs HTTPS — so the server
+                encrypted this one instead. Whoever runs this server could read it.
+              </span>
+            </div>
           </div>
         </div>
 
-        <button type="button" data-new class="btn-ghost mt-3 w-full">↺ Create another secret</button>
+        <button type="button" data-new class="btn-ghost mt-3 w-full">
+          <%- include('partials/icon', { icon: 'rotate' }) %>
+          Create another secret
+        </button>
       </section>
+      </div>
+
+      <!-- Guarantees at a glance: under the form on small screens, under the
+           pitch on wide ones. --------------------------------------------- -->
+      <ul class="mx-auto mt-6 grid max-w-md grid-cols-2 gap-x-4 gap-y-2.5 text-xs font-medium text-neutral-600 sm:flex sm:max-w-none sm:justify-center sm:gap-x-6 xl:col-start-1 xl:row-start-2 xl:mx-0 xl:mt-10 xl:grid xl:max-w-md xl:justify-start xl:gap-y-3 xl:self-start xl:text-sm dark:text-neutral-400">
+        <%
+          const guarantees = [
+            { icon: 'shield', text: 'End-to-end encrypted' },
+            { icon: 'flame', text: 'Burns after one read' },
+            { icon: 'clock', text: 'Expires automatically' },
+            { icon: 'eyeOff', text: 'Never logged' }
+          ];
+        %>
+        <% guarantees.forEach(function (item) { %>
+        <li class="flex items-center gap-1.5">
+          <%- include('partials/icon', { icon: item.icon, cls: 'h-3.5 w-3.5 text-orange-500' }) %>
+          <%= item.text %>
+        </li>
+        <% }); %>
+      </ul>
+      </div>
 
       <!-- How it works -------------------------------------------------- -->
-      <section id="how" class="mt-20 scroll-mt-28">
-        <h2 class="text-center text-xs font-semibold tracking-[0.18em] text-neutral-400 uppercase dark:text-neutral-600">
+      <section id="how" class="mt-24 scroll-mt-24 lg:mt-32">
+        <p class="text-center text-xs font-semibold tracking-[0.18em] text-orange-600 uppercase dark:text-orange-400">
           How it works
+        </p>
+        <h2 class="mt-2 text-center text-2xl font-bold tracking-tight text-balance">
+          Encrypted, shared, burned
         </h2>
 
-        <ol class="mt-8 grid gap-4 sm:grid-cols-3">
+        <ol class="mt-8 grid gap-4 sm:grid-cols-3 lg:mt-10 lg:gap-6">
           <%
+            // Kept to similar lengths so the three cards line up.
             const steps = [
-              { icon: '🔒', title: 'Encrypted', body: 'Your text is sealed with AES-256-GCM before it ever touches the database.' },
-              { icon: '🔗', title: 'Linked', body: 'It gets a random UUID. The link is the only way in, and it is never indexed.' },
-              { icon: '🔥', title: 'Burned', body: 'Revealing it deletes the row in the same query that fetches it. No copies left behind.' }
+              { icon: 'lock', title: 'Encrypted in your browser', body: 'Sealed with AES-256-GCM before it leaves this page. The key lives only in the link, after the #.' },
+              { icon: 'link', title: 'Shared as a link', body: 'A random, unguessable link is the only way in. Link previews in chat apps can’t open it.' },
+              { icon: 'flame', title: 'Burned on reading', body: 'Opening it deletes it from the server. One person reads it, then it’s gone for good.' }
             ];
           %>
           <% steps.forEach(function (step, i) { %>
-          <li class="surface p-5">
-            <div class="flex items-center gap-2.5">
-              <span class="text-lg" aria-hidden="true"><%= step.icon %></span>
-              <span class="font-mono text-[11px] text-neutral-400 dark:text-neutral-600">0<%= i + 1 %></span>
+          <li class="surface p-5 lg:p-6">
+            <div class="flex items-center justify-between">
+              <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                <%- include('partials/icon', { icon: step.icon, cls: 'h-[18px] w-[18px]' }) %>
+              </span>
+              <span class="font-mono text-xs text-neutral-500 dark:text-neutral-400">0<%= i + 1 %></span>
             </div>
-            <h3 class="mt-3 text-sm font-semibold"><%= step.title %></h3>
-            <p class="mt-1.5 text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
+            <h3 class="mt-4 text-sm font-semibold"><%= step.title %></h3>
+            <p class="mt-1.5 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
               <%= step.body %>
             </p>
           </li>
           <% }); %>
         </ol>
+      </section>
 
-        <!-- Stated plainly rather than buried in the README: overselling what the
-             encryption covers is how a tool like this earns misplaced trust. -->
-        <p class="mx-auto mt-6 max-w-lg text-center text-xs leading-relaxed text-pretty text-neutral-400 dark:text-neutral-600">
-          Worth knowing: this isn't zero-knowledge. The decryption key lives on the
-          server, so encryption protects the database — not you from whoever runs it.
-          Self-host it if that matters to you.
+      <!-- Security ------------------------------------------------------ -->
+      <!-- Stated plainly rather than buried in the README: overselling what the
+           encryption covers is how a tool like this earns misplaced trust. -->
+      <section id="security" class="mt-24 scroll-mt-24 lg:mt-32">
+        <p class="text-center text-xs font-semibold tracking-[0.18em] text-orange-600 uppercase dark:text-orange-400">
+          Security
         </p>
+        <h2 class="mt-2 text-center text-2xl font-bold tracking-tight text-balance">
+          What it protects against — and what it doesn't
+        </h2>
+
+        <%
+          const covered = [
+            'A stolen database or backup — it only ever holds ciphertext.',
+            'The server reading your secret — the key never reaches it.',
+            'Chat link previews opening it before your recipient does.',
+            'Someone reading it first unnoticed — your recipient sees it’s gone.'
+          ];
+          const notCovered = [
+            'Anyone who gets the whole link first, unless you set a passphrase.',
+            'A compromised server sending altered JavaScript. Self-host if that matters.',
+            'Malware on the sender’s or the recipient’s device.',
+            'The recipient keeping a copy once they’ve read it.'
+          ];
+        %>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:mt-10 lg:gap-6">
+          <div class="surface p-5 lg:p-6">
+            <h3 class="flex items-center gap-2 text-sm font-semibold">
+              <%- include('partials/icon', { icon: 'checkCircle', cls: 'h-4 w-4 text-emerald-600 dark:text-emerald-400' }) %>
+              Protects against
+            </h3>
+            <ul class="mt-3 space-y-2.5 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
+              <% covered.forEach(function (item) { %>
+              <li class="flex items-start gap-2">
+                <%- include('partials/icon', { icon: 'check', cls: 'mt-1 h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400' }) %>
+                <span><%= item %></span>
+              </li>
+              <% }); %>
+            </ul>
+          </div>
+
+          <div class="surface p-5 lg:p-6">
+            <h3 class="flex items-center gap-2 text-sm font-semibold">
+              <%- include('partials/icon', { icon: 'alert', cls: 'h-4 w-4 text-amber-600 dark:text-amber-400' }) %>
+              Doesn't protect against
+            </h3>
+            <ul class="mt-3 space-y-2.5 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
+              <% notCovered.forEach(function (item) { %>
+              <li class="flex items-start gap-2">
+                <span class="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-amber-500" aria-hidden="true"></span>
+                <span><%= item %></span>
+              </li>
+              <% }); %>
+            </ul>
+          </div>
+        </div>
+
+        <% if (repoUrl) { %>
+        <p class="mt-5 text-center text-sm">
+          <a
+            href="<%= repoUrl %>#threat-model"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="font-medium text-orange-600 underline-offset-4 hover:underline dark:text-orange-400"
+          >
+            Read the full threat model →
+          </a>
+        </p>
+        <% } %>
       </section>
     </main>
 
-    <%- include('partials/footer') %>
+    <%- include('partials/footer', { wide: true }) %>
   </body>
 </html>

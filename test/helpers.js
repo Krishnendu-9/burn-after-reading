@@ -44,21 +44,54 @@ export async function bootTestApp() {
   };
 }
 
-/** POST a secret and return the parsed response body. */
-export async function createSecret(app, message, ttlHours) {
+/** POST to the create endpoint and return the status and parsed body. */
+async function postSecret(app, fields) {
   const response = await fetch(app.url('/api/secrets'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, ttlHours })
+    body: JSON.stringify(fields)
   });
 
   return { status: response.status, body: await response.json() };
 }
 
-/** Submit the reveal form the way a browser would. */
-export function reveal(app, token) {
+/**
+ * Create a secret the way an API client does: plaintext, encrypted server-side.
+ * @param {{ ttlHours?: number, passphrase?: string }} [options]
+ */
+export function createSecret(app, message, { ttlHours, passphrase } = {}) {
+  return postSecret(app, { message, ttlHours, passphrase });
+}
+
+/**
+ * Create a secret the way the web form does: encrypted first with the same
+ * module the browser runs, so only ciphertext is sent. Also returns the key
+ * that would go after the # in the link.
+ */
+export async function createEncryptedSecret(app, message, { ttlHours, passphrase } = {}) {
+  const { encryptMessage } = await import('../src/client/e2e.js');
+  const { ciphertext, key } = await encryptMessage(message);
+
+  return { ...(await postSecret(app, { ciphertext, ttlHours, passphrase })), key, ciphertext };
+}
+
+/**
+ * Submit the reveal form the way a browser would, optionally with a passphrase.
+ */
+export function reveal(app, token, passphrase) {
+  const headers = { 'Sec-Fetch-Site': 'same-origin' };
+  if (passphrase === undefined) {
+    return fetch(app.url(`/s/${token}`), { method: 'POST', headers });
+  }
+
   return fetch(app.url(`/s/${token}`), {
     method: 'POST',
-    headers: { 'Sec-Fetch-Site': 'same-origin' }
+    headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ passphrase }).toString()
   });
+}
+
+/** Pulls the ciphertext out of the secret page's data attribute. */
+export function ciphertextFrom(html) {
+  return html.match(/data-ciphertext="([A-Za-z0-9_-]+)"/)?.[1] ?? null;
 }

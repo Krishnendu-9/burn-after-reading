@@ -10,6 +10,8 @@ import '@fontsource/jetbrains-mono/latin-500.css';
 
 import './style.css';
 
+import * as e2e from './e2e.js';
+
 /* ---------------------------------------------------------------- theming */
 
 const root = document.documentElement;
@@ -66,6 +68,31 @@ if (nav) {
   window.addEventListener('scroll', syncNavShadow, { passive: true });
 }
 
+/* -------------------------------------------------- passphrase show/hide */
+
+/**
+ * Wires an eye button to the passphrase input in the same
+ * [data-passphrase-field] wrapper, so a typo can be caught before it costs a
+ * send or a reveal attempt. Used by the compose form and the reveal page.
+ *
+ * @returns {(visible: boolean) => void} sets the state directly, e.g. to hide
+ *   the passphrase again once the form has been submitted.
+ */
+function bindPassphraseToggle(button) {
+  const input = button.closest('[data-passphrase-field]').querySelector('input');
+
+  const setVisible = (visible) => {
+    input.type = visible ? 'text' : 'password';
+    button.setAttribute('aria-pressed', String(visible));
+    button.setAttribute('aria-label', visible ? 'Hide passphrase' : 'Show passphrase');
+    button.querySelector('[data-eye]').classList.toggle('hidden', visible);
+    button.querySelector('[data-eye-off]').classList.toggle('hidden', !visible);
+  };
+
+  button.addEventListener('click', () => setVisible(input.type === 'password'));
+  return setVisible;
+}
+
 /* ----------------------------------------------------------- compose form */
 
 const form = document.querySelector('[data-secret-form]');
@@ -77,6 +104,8 @@ if (form) {
   const counter = document.querySelector('[data-counter]');
   const progress = document.querySelector('[data-progress]');
   const errorBox = document.querySelector('[data-error]');
+  // Swapped with the `hidden` attribute, not the class: both panels carry
+  // xl:flex for the two-column layout, which would override a `hidden` class.
   const composePanel = document.querySelector('[data-compose]');
   const resultPanel = document.querySelector('[data-result]');
   const linkInput = document.querySelector('[data-link]');
@@ -84,20 +113,40 @@ if (form) {
   const maxLength = Number(textarea.getAttribute('maxlength')) || 10000;
 
   const showError = (message) => {
-    errorBox.textContent = message ? `⚠️ ${message}` : '';
+    errorBox.querySelector('[data-error-text]').textContent = message ?? '';
     errorBox.classList.toggle('hidden', !message);
-    errorBox.classList.toggle('flex', Boolean(message));
+  };
+
+  // Grow with the content instead of opening as a tall empty box. The CSS
+  // max-height caps it, after which it scrolls.
+  const autoGrow = () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = `${textarea.scrollHeight}px`;
   };
 
   const sync = () => {
     const used = textarea.value.length;
     counter.textContent = `${used.toLocaleString()} / ${maxLength.toLocaleString()}`;
+    counter.toggleAttribute('data-near-limit', used >= maxLength * 0.9);
     progress.style.width = `${Math.min((used / maxLength) * 100, 100)}%`;
     submit.disabled = textarea.value.trim().length === 0;
+    autoGrow();
   };
 
   textarea.addEventListener('input', sync);
   sync();
+
+  // The shortcut hint defaults to Ctrl; Apple keyboards use ⌘ instead.
+  const isApple = /Mac|iPhone|iPad/.test(
+    navigator.userAgentData?.platform ?? navigator.platform ?? ''
+  );
+  const shortcut = form.querySelector('[data-shortcut]');
+  if (shortcut && isApple) shortcut.textContent = '⌘ ↵';
+
+  const passphraseInput = form.querySelector('[name="passphrase"]');
+  const setPassphraseVisible = bindPassphraseToggle(
+    form.querySelector('[data-toggle-passphrase]')
+  );
 
   // Ctrl/Cmd + Enter submits.
   textarea.addEventListener('keydown', (event) => {
@@ -106,6 +155,15 @@ if (form) {
       form.requestSubmit();
     }
   });
+
+  const fitLink = () => {
+    if (resultPanel.hidden) return;
+    linkInput.style.height = 'auto';
+    const borders = linkInput.offsetHeight - linkInput.clientHeight;
+    linkInput.style.height = `${linkInput.scrollHeight + borders}px`;
+  };
+  // The link rewraps when the window changes width.
+  window.addEventListener('resize', fitLink, { passive: true });
 
   const humanise = (hours) => {
     if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'}`;
@@ -121,34 +179,60 @@ if (form) {
 
     try {
       const fields = new FormData(form);
+      const request = {
+        ttlHours: Number(fields.get('ttlHours')),
+        passphrase: String(fields.get('passphrase') ?? '')
+      };
+
+      // Encrypt here whenever the browser can, so only ciphertext leaves the
+      // page and the key never reaches the server at all. Without WebCrypto
+      // (a plain-HTTP origin) the server encrypts it instead, and the result
+      // screen says so rather than quietly claiming more than it delivers.
+      let key = null;
+      if (e2e.isSupported()) {
+        const sealed = await e2e.encryptMessage(textarea.value);
+        request.ciphertext = sealed.ciphertext;
+        key = sealed.key;
+      } else {
+        request.message = textarea.value;
+      }
 
       const response = await fetch('/api/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: textarea.value,
-          ttlHours: Number(fields.get('ttlHours')),
-          passphrase: String(fields.get('passphrase') ?? '')
-        })
+        body: JSON.stringify(request)
       });
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Could not create the link.');
 
-      linkInput.value = data.url;
+      // The fragment is the key. It is added here, after the request, because
+      // the server must never see it.
+      linkInput.value = key ? `${data.url}#${key}` : data.url;
       expiryLabel.textContent = humanise(data.expiresInHours);
 
       // Only mention the passphrase when one was actually set.
       document
         .querySelector('[data-passphrase-note]')
         ?.classList.toggle('hidden', !data.protected);
+      document.querySelector('[data-e2e-note]')?.classList.toggle('hidden', Boolean(key));
 
-      composePanel.classList.add('hidden');
-      resultPanel.classList.remove('hidden');
-      linkInput.focus();
-      linkInput.select();
+      composePanel.hidden = true;
+      resultPanel.hidden = false;
+
+      // Sized once visible (a hidden element measures as zero) so the whole
+      // link shows, key included. scrollHeight leaves out the borders, which
+      // border-box sizing counts, so they are added back or the last line
+      // clips.
+      fitLink();
+
+      // Focus the copy button rather than pre-selecting the link: a selected
+      // link is harder to read, and copying is the next step anyway — Enter
+      // or Space does it from here.
+      resultPanel.querySelector('[data-copy]')?.focus();
       textarea.value = '';
-      form.querySelector('[name="passphrase"]').value = '';
+      passphraseInput.value = '';
+      setPassphraseVisible(false);
     } catch (error) {
       showError(error.message);
     } finally {
@@ -158,8 +242,10 @@ if (form) {
   });
 
   document.querySelector('[data-new]')?.addEventListener('click', () => {
-    resultPanel.classList.add('hidden');
-    composePanel.classList.remove('hidden');
+    resultPanel.hidden = true;
+    composePanel.hidden = false;
+    // Measured again now that it is visible; a hidden textarea reports no height.
+    sync();
     textarea.focus();
   });
 }
@@ -171,12 +257,69 @@ if (form) {
 const revealForm = document.querySelector('[data-reveal-form]');
 
 if (revealForm) {
+  // An end-to-end link keeps its key in the #fragment, and a form POST lands on
+  // a URL without one unless the action carries it. Browsers still never send a
+  // fragment to the server; this only keeps it in the address bar of the page
+  // that comes back, where the decrypt step below reads it.
+  if (location.hash.length > 1) {
+    revealForm.action = `${revealForm.getAttribute('action')}${location.hash}`;
+    // Reassurance that the link arrived whole. Read from the address bar only;
+    // nothing about it is sent anywhere.
+    document.querySelector('[data-key-found]')?.removeAttribute('hidden');
+  }
+
+  const toggle = revealForm.querySelector('[data-toggle-passphrase]');
+  const setPassphraseVisible = toggle ? bindPassphraseToggle(toggle) : null;
+
   revealForm.addEventListener('submit', () => {
     const button = revealForm.querySelector('[data-reveal-submit]');
     const label = revealForm.querySelector('[data-reveal-label]');
     if (button) button.disabled = true;
     if (label) label.textContent = 'Decrypting…';
+    // Masked again before the page goes, so the passphrase isn't left on
+    // screen while the next page loads.
+    setPassphraseVisible?.(false);
   });
+}
+
+/* ------------------------------------------------------ end-to-end decrypt */
+
+// The server handed back ciphertext it cannot read; the key is in the fragment.
+const sealedBody = document.querySelector('[data-secret][data-ciphertext]');
+
+if (sealedBody) {
+  const key = location.hash.slice(1);
+
+  // The row is already deleted, so the key is useless now — but there is no
+  // reason to leave it in the address bar or the history either.
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+
+  const fail = (text) => {
+    sealedBody.textContent = text;
+    sealedBody.classList.remove('is-masked');
+    document.querySelector('[data-reveal]')?.remove();
+    document.querySelector('[data-copy="#secret-body"]')?.remove();
+  };
+
+  if (!key) {
+    fail(
+      'This link was missing its decryption key — the part after the "#". The ' +
+        'secret has been deleted and cannot be recovered. Ask the sender for a ' +
+        'fresh link, and copy all of it.'
+    );
+  } else {
+    e2e.decryptMessage(sealedBody.dataset.ciphertext, key).then(
+      (plaintext) => {
+        sealedBody.textContent = plaintext;
+      },
+      () => {
+        fail(
+          'The decryption key in this link is wrong or incomplete. The secret has ' +
+            'been deleted and cannot be recovered. Ask the sender for a fresh link.'
+        );
+      }
+    );
+  }
 }
 
 /* ------------------------------------------------- shoulder-surfing guard */
@@ -195,6 +338,40 @@ if (secretBody && revealButton) {
     secretBody.classList.remove('is-masked');
     revealButton.remove();
   });
+}
+
+/* -------------------------------------------------- creation time, locally */
+
+// The server renders UTC because it can't know the reader's time zone; the
+// browser can. "created 2 minutes ago · 27 Sep 2026, 1:34 PM", in the
+// reader's own locale and zone. The exact UTC value stays in the title.
+const createdAt = document.querySelector('[data-created]');
+const created = createdAt ? new Date(createdAt.dateTime) : null;
+
+if (created && !Number.isNaN(created.getTime())) {
+  const absolute = new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(created);
+  const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+  const relative = () => {
+    // Clamped at zero: a server clock slightly ahead would otherwise read as
+    // "in 1 minute".
+    const seconds = Math.max(0, (Date.now() - created.getTime()) / 1000);
+    for (const [unit, size] of [['day', 86_400], ['hour', 3_600], ['minute', 60]]) {
+      if (seconds >= size) return relativeFormat.format(-Math.floor(seconds / size), unit);
+    }
+    return 'just now';
+  };
+
+  const render = () => {
+    createdAt.textContent = `created ${relative()} · ${absolute}`;
+  };
+
+  render();
+  // Keeps "2 minutes ago" honest while the page stays open.
+  setInterval(render, 30_000);
 }
 
 /* ------------------------------------------------------ copy to clipboard */
@@ -224,11 +401,19 @@ for (const button of document.querySelectorAll('[data-copy]')) {
     const label = button.querySelector('[data-copy-label]') ?? button;
     if (label.dataset.busy) return;
 
+    // Swap the copy icon for a check while the label says so.
+    const setCopied = (copied) => {
+      button.querySelector('[data-copy-icon]')?.classList.toggle('hidden', copied);
+      button.querySelector('[data-copied-icon]')?.classList.toggle('hidden', !copied);
+    };
+
     const original = label.textContent;
     label.dataset.busy = '1';
-    label.textContent = '✅ Copied';
+    label.textContent = 'Copied';
+    setCopied(true);
     setTimeout(() => {
       label.textContent = original;
+      setCopied(false);
       delete label.dataset.busy;
     }, 1800);
   });

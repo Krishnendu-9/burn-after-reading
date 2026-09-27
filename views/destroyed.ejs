@@ -1,27 +1,30 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <%- include('partials/head', { title: 'This message has self-destructed' }) %>
+    <%- include('partials/head', { title: locals.heading || 'This message has self-destructed' }) %>
   </head>
   <body class="font-sans">
     <%- include('partials/backdrop') %>
     <%- include('partials/nav') %>
 
-    <main class="mx-auto w-full max-w-2xl px-6 pt-16">
-      <section class="surface animate-rise px-6 py-14 text-center shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
+    <main class="mx-auto w-full max-w-2xl px-5 pt-12 sm:px-6 sm:pt-16">
+      <section class="surface animate-rise px-6 py-12 text-center sm:py-14 shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
         <!-- Ember with smoke drifting up -->
         <div class="relative mx-auto mb-7 h-16 w-16" aria-hidden="true">
           <div class="absolute inset-0 rounded-full bg-gradient-to-br from-amber-400/30 to-orange-600/20 blur-xl animate-flicker"></div>
-          <div class="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 text-2xl dark:border-white/10 dark:bg-white/[0.04]">
-            💨
+          <div class="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 text-neutral-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-neutral-400">
+            <%- include('partials/icon', { icon: 'wind', cls: 'h-7 w-7' }) %>
           </div>
           <span class="absolute -top-1 left-4 h-1.5 w-1.5 rounded-full bg-neutral-400/50 animate-drift dark:bg-white/30"></span>
           <span class="absolute -top-1 left-8 h-1 w-1 rounded-full bg-neutral-400/40 animate-drift [animation-delay:1.2s] dark:bg-white/20"></span>
           <span class="absolute -top-1 left-11 h-1.5 w-1.5 rounded-full bg-neutral-400/30 animate-drift [animation-delay:2.4s] dark:bg-white/20"></span>
         </div>
 
+        <%# `heading` replaces the title for the rare case where the secret still
+            exists but can't be opened — calling that "self-destructed" would be
+            wrong. %>
         <h1 class="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-          This message has <span class="text-gradient">self-destructed</span>
+          <% if (locals.heading) { %><%= heading %><% } else { %>This message has <span class="text-gradient">self-destructed</span><% } %>
         </h1>
 
         <p class="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
@@ -31,10 +34,10 @@
         </p>
 
         <div class="mt-7 flex flex-col justify-center gap-2 sm:flex-row">
-          <a href="/" class="btn-primary">🔥 Create a new secret</a>
+          <a href="/" class="btn-primary"><%- include('partials/icon', { icon: 'flame' }) %> Create a new secret</a>
         </div>
 
-        <p class="mt-8 text-xs text-neutral-400 dark:text-neutral-600">
+        <p class="mt-8 text-xs text-neutral-500 dark:text-neutral-400">
           Expecting something? Ask the sender for a fresh link.
         </p>
       </section>

@@ -25,7 +25,7 @@ after(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/* ------------------------------------------------- rate limit store (#10) */
+/* ----------------------------------------------------- rate limit store */
 
 test('counts survive a new store instance, the way they survive a restart', () => {
   const first = new store.SqliteRateLimitStore('test-a');
@@ -164,7 +164,7 @@ test('flags read false/0/no/off as off and anything else as on', async () => {
   delete process.env.BAR_FLAG;
 });
 
-/* --------------------------------------------------------- log safety (#9) */
+/* ------------------------------------------------------------- log safety */
 
 test('a secret URL is never written to the log in full', () => {
   const token = crypto.randomUUID();
@@ -179,7 +179,7 @@ test('ordinary paths are logged as they are', () => {
   assert.equal(redactPath('/api/secrets'), '/api/secrets');
 });
 
-/* ------------------------------------------------------ log format (#6) */
+/* ---------------------------------------------------------- log format */
 
 /** Captures whatever the logger writes, whichever console method it uses. */
 function capture(run) {

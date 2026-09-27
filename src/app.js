@@ -1,15 +1,17 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { v4 as uuidv4 } from 'uuid';
 
-import { createSecret, burnSecret, pingDatabase, countAll, purgeExpired } from './db.js';
 import {
-  encrypt,
-  decrypt,
-  encryptWithPassphrase,
-  decryptWithPassphrase
-} from './crypto.js';
+  createSecret,
+  burnSecret,
+  pingDatabase,
+  countAll,
+  purgeExpired,
+  UnreadableSecretError
+} from './db.js';
+import { encrypt, decrypt, encryptWithPassphrase, openPassphraseLayer } from './crypto.js';
 import { assets } from './assets.js';
 import { createLimiter, revealLimiter, globalLimiter } from './limits.js';
 import { securityHeaders } from './security.js';
@@ -27,6 +29,20 @@ export const MIN_PASSPHRASE_LENGTH = 4;
 export const MAX_PASSPHRASE_LENGTH = 200;
 
 /**
+ * Bounds for a message the browser encrypted itself, sent as
+ * base64url(iv ‖ ciphertext ‖ tag) — see src/client/e2e.js. The server cannot
+ * measure the plaintext, so the ceiling is derived from MAX_SECRET_LENGTH
+ * instead: one UTF-16 code unit is at most 3 bytes of UTF-8, plus the 12-byte
+ * IV and 16-byte tag, then base64's 4/3 growth.
+ */
+const E2E_OVERHEAD_BYTES = 12 + 16;
+export const MAX_CIPHERTEXT_LENGTH = Math.ceil(
+  ((MAX_SECRET_LENGTH * 3 + E2E_OVERHEAD_BYTES) * 4) / 3
+);
+const MIN_CIPHERTEXT_LENGTH = Math.ceil(((E2E_OVERHEAD_BYTES + 1) * 4) / 3);
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+
+/**
  * Hard ceiling on stored rows. Rate limits cap a single address; they do nothing
  * about traffic spread across many. Without a ceiling the disk is the limit, and
  * SQLite failing on a full disk takes the whole app down rather than one request.
@@ -40,6 +56,7 @@ const MAX_STORED_SECRETS = envNumber('MAX_SECRETS', 10_000);
  * @param {object} options
  * @param {string} options.baseUrl   Origin used to build shareable links.
  * @param {string|null} [options.repoUrl]
+ * @param {string|null} [options.authorName] Credited in the footer when set.
  * @param {boolean|number|string} [options.trustProxy]
  *   How many proxy hops to trust for `req.ip` and `req.secure`. Defaults to
  *   `false`, meaning trust nothing. This must stay off unless a proxy really is
@@ -50,6 +67,7 @@ const MAX_STORED_SECRETS = envNumber('MAX_SECRETS', 10_000);
 export function createApp({
   baseUrl,
   repoUrl = null,
+  authorName = null,
   trustProxy = false,
   logRequests = true
 }) {
@@ -79,9 +97,13 @@ export function createApp({
   );
 
   app.locals.assets = assets;
-  // Optional. The "Source" link is hidden entirely when this is unset, so the app
-  // never ships a dead placeholder URL.
+  // Both optional. The GitHub links and the footer credit are hidden entirely
+  // when unset, so the app never ships a dead placeholder.
   app.locals.repoUrl = repoUrl;
+  app.locals.authorName = authorName;
+  // Shared with the templates so the form's minlength/maxlength can't drift from
+  // what the API enforces.
+  app.locals.passphraseLength = { min: MIN_PASSPHRASE_LENGTH, max: MAX_PASSPHRASE_LENGTH };
 
   // Liveness probe for the host platform. Mounted above the rate limiter on
   // purpose: platforms poll this every few seconds, which would otherwise eat the
@@ -103,24 +125,44 @@ export function createApp({
 
   // Home: the compose form.
   app.get('/', (req, res) => {
-    res.render('index', { maxLength: MAX_SECRET_LENGTH, ttlChoices: TTL_CHOICES });
+    res.render('index', {
+      maxLength: MAX_SECRET_LENGTH,
+      ttlChoices: TTL_CHOICES,
+      defaultTtlHours: DEFAULT_TTL_HOURS
+    });
   });
 
   // Create a secret. Returns the one-time URL as JSON.
-  app.post('/api/secrets', createLimiter, (req, res) => {
-    const message = typeof req.body?.message === 'string' ? req.body.message : '';
-    const passphrase = typeof req.body?.passphrase === 'string' ? req.body.passphrase.trim() : '';
-    const ttlHours = TTL_CHOICES.includes(Number(req.body?.ttlHours))
-      ? Number(req.body.ttlHours)
+  //
+  // Two shapes are accepted. The web form sends `ciphertext`: the browser has
+  // already encrypted the message under a key that lives only in the link's
+  // #fragment, so the server stores something it cannot read. `message` is
+  // plaintext, for API clients and for browsers without WebCrypto (a non-HTTPS
+  // origin); the server encrypts that one itself, and so could read it.
+  app.post('/api/secrets', createLimiter, async (req, res) => {
+    const body = req.body ?? {};
+    const ciphertext = typeof body.ciphertext === 'string' ? body.ciphertext : null;
+    const message = typeof body.message === 'string' ? body.message : '';
+    const passphrase = typeof body.passphrase === 'string' ? body.passphrase.trim() : '';
+    const ttlHours = TTL_CHOICES.includes(Number(body.ttlHours))
+      ? Number(body.ttlHours)
       : DEFAULT_TTL_HOURS;
+    const tooLong = `Message is too long (max ${MAX_SECRET_LENGTH.toLocaleString()} characters).`;
 
-    if (!message.trim()) {
-      return res.status(400).json({ error: 'A message is required.' });
-    }
-    if (message.length > MAX_SECRET_LENGTH) {
-      return res.status(413).json({
-        error: `Message is too long (max ${MAX_SECRET_LENGTH.toLocaleString()} characters).`
-      });
+    if (ciphertext !== null) {
+      if (ciphertext.length > MAX_CIPHERTEXT_LENGTH) {
+        return res.status(413).json({ error: tooLong });
+      }
+      if (ciphertext.length < MIN_CIPHERTEXT_LENGTH || !BASE64URL.test(ciphertext)) {
+        return res.status(400).json({ error: 'The encrypted message is malformed.' });
+      }
+    } else {
+      if (!message.trim()) {
+        return res.status(400).json({ error: 'A message is required.' });
+      }
+      if (message.length > MAX_SECRET_LENGTH) {
+        return res.status(413).json({ error: tooLong });
+      }
     }
     if (passphrase && passphrase.length < MIN_PASSPHRASE_LENGTH) {
       return res.status(400).json({
@@ -143,16 +185,30 @@ export function createApp({
       }
     }
 
-    const token = uuidv4();
-    const payload = passphrase ? encryptWithPassphrase(message, passphrase) : encrypt(message);
+    const clientEncrypted = ciphertext !== null;
+    const content = clientEncrypted ? ciphertext : message;
 
-    createSecret({ token, payload, ttlHours, requiresPassphrase: Boolean(passphrase) });
+    const token = crypto.randomUUID();
+    const payload = passphrase
+      ? await encryptWithPassphrase(content, passphrase)
+      : encrypt(content);
 
+    createSecret({
+      token,
+      payload,
+      ttlHours,
+      requiresPassphrase: Boolean(passphrase),
+      clientEncrypted
+    });
+
+    // The URL carries no key. For an end-to-end secret the browser appends
+    // "#<key>" itself; the server never sees it.
     res.status(201).json({
       token,
       url: `${baseUrl}/s/${token}`,
       expiresInHours: ttlHours,
-      protected: Boolean(passphrase)
+      protected: Boolean(passphrase),
+      endToEnd: clientEncrypted
     });
   });
 
@@ -174,7 +230,7 @@ export function createApp({
 
   // Step 2: the burn. Preview bots never issue POSTs, so reaching here means a
   // human chose to destroy the secret.
-  app.post('/s/:token', revealLimiter, (req, res) => {
+  app.post('/s/:token', revealLimiter, async (req, res) => {
     // Cheap CSRF guard. Browsers set Sec-Fetch-Site on every request; anything
     // cross-origin is a forged submission rather than our own form. Non-browser
     // clients omit the header entirely and are left alone.
@@ -186,16 +242,46 @@ export function createApp({
     const passphrase =
       typeof req.body?.passphrase === 'string' ? req.body.passphrase.trim() : '';
 
-    // Runs inside the burn transaction. Throwing means "do not destroy this" —
-    // a wrong passphrase costs an attempt, not the secret.
-    const result = burnSecret(req.params.token, (row) => {
-      if (!row.requires_passphrase) return decrypt(row.payload);
+    // Throwing means "do not destroy this" — a wrong passphrase costs an
+    // attempt, not the secret.
+    const result = await burnSecret(req.params.token, (row) => {
+      // The server layer first, on its own. Failing here is never the reader's
+      // doing — the key changed without rotation, or the row is damaged — so it
+      // is reported as unreadable instead of being counted as a wrong guess.
+      // Counting it used to tell the reader to enter a passphrase that a secret
+      // without one could never accept, then destroy it after five tries.
+      let inner;
+      try {
+        inner = decrypt(row.payload);
+      } catch (error) {
+        throw new UnreadableSecretError(error);
+      }
+
+      if (!row.requires_passphrase) return inner;
       if (!passphrase) throw new Error('passphrase required');
-      return decryptWithPassphrase(row.payload, passphrase);
+      return openPassphraseLayer(inner, passphrase);
     });
 
     if (result.status === 'missing') {
       return res.status(404).render('destroyed', { reason: null });
+    }
+
+    if (result.status === 'unreadable') {
+      // An operator problem, so it is logged loudly — but without the token.
+      logEvent(
+        'error',
+        'secret_unreadable',
+        { hint: 'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS.' },
+        '[error] a secret could not be decrypted with any configured key — ' +
+          'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS.'
+      );
+      return res.status(500).render('destroyed', {
+        heading: 'This secret can’t be opened',
+        reason:
+          'The server can no longer decrypt it, most likely because its encryption ' +
+          'key was changed. It hasn’t been used up — if the key is restored, the ' +
+          'same link will work. Otherwise, ask the sender for a new link.'
+      });
     }
 
     if (result.status === 'exhausted') {
@@ -214,7 +300,13 @@ export function createApp({
       });
     }
 
-    res.render('secret', { message: result.message, createdAt: result.createdAt });
+    // For an end-to-end secret `message` is still ciphertext here. The page hands
+    // it to the browser, which decrypts it with the key from the #fragment.
+    res.render('secret', {
+      message: result.message,
+      createdAt: result.createdAt,
+      clientEncrypted: result.clientEncrypted
+    });
   });
 
   /* ----------------------------------------------------- errors & fallback */

@@ -1,11 +1,31 @@
-<footer class="mx-auto w-full max-w-3xl px-6 pt-16 pb-10">
+<%# `wide` matches the home page's wider layout; the single-purpose pages stay narrow. %>
+<footer class="mx-auto w-full <%= locals.wide ? 'max-w-6xl lg:px-8' : 'max-w-3xl' %> px-5 pt-14 pb-8 sm:px-6">
   <div class="flex flex-col items-center gap-4 border-t border-neutral-200/70 pt-8 dark:border-white/5">
     <div class="flex flex-wrap justify-center gap-2">
-      <% ['Node.js', 'Express', 'SQLite', 'Tailwind', 'Vite'].forEach(function (tech) { %>
+      <% ['Node.js', 'Express', 'SQLite', 'WebCrypto', 'Tailwind', 'Vite'].forEach(function (tech) { %>
       <span class="chip"><%= tech %></span>
       <% }); %>
     </div>
-    <p class="text-center text-xs text-neutral-400 dark:text-neutral-600">
+
+    <%# Both parts are optional (AUTHOR_NAME, REPO_URL) and vanish when unset. %>
+    <% if (authorName || repoUrl) { %>
+    <p class="flex flex-wrap items-center justify-center gap-x-2 text-sm text-neutral-600 dark:text-neutral-400">
+      <% if (authorName) { %>
+      <span>Built by <span class="font-semibold text-neutral-900 dark:text-neutral-100"><%= authorName %></span></span>
+      <% } %>
+      <% if (authorName && repoUrl) { %><span aria-hidden="true">·</span><% } %>
+      <% if (repoUrl) { %>
+      <a
+        href="<%= repoUrl %>"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="font-medium text-orange-600 underline-offset-4 hover:underline dark:text-orange-400"
+      >Source on GitHub</a>
+      <% } %>
+    </p>
+    <% } %>
+
+    <p class="text-center text-xs text-neutral-500 dark:text-neutral-400">
       No accounts · No trackers · No recovery — that's the point.
     </p>
   </div>

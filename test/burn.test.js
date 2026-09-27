@@ -1,25 +1,29 @@
-import test, { before, after } from 'node:test';
+import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bootTestApp, createSecret, reveal } from './helpers.js';
+import {
+  bootTestApp,
+  createSecret,
+  createEncryptedSecret,
+  reveal,
+  ciphertextFrom
+} from './helpers.js';
 
 let app;
-let crypto2;
-
-/** Create a secret with an optional passphrase. */
-async function createSecret2(message, passphrase) {
-  const response = await fetch(app.url('/api/secrets'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, passphrase })
-  });
-
-  return { status: response.status, body: await response.json() };
-}
+let serverCrypto;
+let e2e;
 
 before(async () => {
   app = await bootTestApp();
-  crypto2 = await import('../src/crypto.js');
+  serverCrypto = await import('../src/crypto.js');
+  e2e = await import('../src/client/e2e.js');
+});
+
+// Every request here comes from 127.0.0.1, so without this the suite would
+// share one rate-limit budget and start failing with 429s as it grows. The
+// limiter has its own tests in infra.test.js.
+beforeEach(() => {
+  app.db.db.prepare('DELETE FROM rate_limits').run();
 });
 
 after(async () => {
@@ -56,7 +60,10 @@ test('ten simultaneous reveals of the same link: exactly one gets the secret', a
   const message = 'only-one-of-you-gets-this';
   const { body } = await createSecret(app, message);
 
-  // Fired without awaiting in between, so they queue against the server together.
+  // Fired together, end to end over HTTP. Without a passphrase nothing yields
+  // between the read and the delete, so this checks the route's handling rather
+  // than the race itself — the passphrase test below and race.test.js are the
+  // ones that force concurrent readers, and both fail if the DELETE check goes.
   const responses = await Promise.all(
     Array.from({ length: 10 }, () => reveal(app, body.token))
   );
@@ -68,6 +75,37 @@ test('ten simultaneous reveals of the same link: exactly one gets the secret', a
   assert.equal(winners.length, 1, `exactly one caller may see the secret, got ${winners.length}`);
   assert.equal(losers.length, 9);
   assert.equal(app.db.countLive(body.token), 0);
+});
+
+test('simultaneous correct passphrases: still exactly one reader', async () => {
+  // The widest window there is: every request spends ~100ms in scrypt on the
+  // thread pool after reading the row, and all of them succeed at unsealing.
+  const message = 'passphrase-race';
+  const { body } = await createSecret(app, message, { passphrase: 'shared-secret' });
+
+  const responses = await Promise.all(
+    Array.from({ length: 6 }, () => reveal(app, body.token, 'shared-secret'))
+  );
+  const bodies = await Promise.all(responses.map((r) => r.text()));
+
+  assert.equal(bodies.filter((html) => html.includes(message)).length, 1);
+  assert.equal(responses.filter((r) => r.status === 404).length, 5);
+  assert.equal(app.db.countLive(body.token), 0);
+});
+
+test('simultaneous wrong passphrases are each counted', async () => {
+  const { body } = await createSecret(app, 'count-every-guess', { passphrase: 'the-real-one' });
+
+  const responses = await Promise.all(
+    Array.from({ length: 3 }, (_, i) => reveal(app, body.token, `guess-${i}`))
+  );
+
+  assert.deepEqual(
+    responses.map((r) => r.status),
+    [401, 401, 401]
+  );
+  const row = app.db.db.prepare('SELECT attempts FROM secrets WHERE token = ?').get(body.token);
+  assert.equal(row.attempts, 3, 'no guess may be lost to a read-modify-write race');
 });
 
 /* -------------------------------------------------- the link-preview defence */
@@ -147,7 +185,7 @@ test('an expired secret is unreadable and never returns its payload', async () =
     .run(token);
 
   assert.equal(app.db.countLive(token), 0);
-  assert.equal(app.db.burnSecret(token, (row) => row.payload).status, 'missing');
+  assert.equal((await app.db.burnSecret(token, (row) => row.payload)).status, 'missing');
 
   // The row is still on disk until the sweep runs, but no request can reach it.
   const response = await reveal(app, token);
@@ -156,7 +194,7 @@ test('an expired secret is unreadable and never returns its payload', async () =
 });
 
 test('purgeExpired removes expired rows and leaves live ones alone', async () => {
-  const { body } = await createSecret(app, 'still valid', 24);
+  const { body } = await createSecret(app, 'still valid', { ttlHours: 24 });
 
   app.db.db
     .prepare(
@@ -186,7 +224,7 @@ test('rejects a message over the length limit', async () => {
 });
 
 test('falls back to the default TTL when given an unsupported value', async () => {
-  const { body } = await createSecret(app, 'ttl check', 9999);
+  const { body } = await createSecret(app, 'ttl check', { ttlHours: 9999 });
   assert.equal(body.expiresInHours, 24);
 });
 
@@ -252,48 +290,36 @@ test('an oversized body is rejected without a server error', async () => {
 
 /* ----------------------------------------------------- passphrase protection */
 
-/** Submit the reveal form with a passphrase, the way the browser would. */
-function revealWith(token, passphrase) {
-  return fetch(app.url(`/s/${token}`), {
-    method: 'POST',
-    headers: {
-      'Sec-Fetch-Site': 'same-origin',
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: new URLSearchParams({ passphrase }).toString()
-  });
-}
-
 test('a passphrase-protected secret opens with the right passphrase', async () => {
   const message = 'guarded-by-a-passphrase';
-  const { status, body } = await createSecret2(message, 'correct horse');
+  const { status, body } = await createSecret(app, message, { passphrase: 'correct horse' });
 
   assert.equal(status, 201);
   assert.equal(body.protected, true);
 
-  const response = await revealWith(body.token, 'correct horse');
+  const response = await reveal(app, body.token, 'correct horse');
   assert.equal(response.status, 200);
   assert.match(await response.text(), new RegExp(message));
 });
 
 test('a wrong passphrase does NOT destroy the secret', async () => {
   const message = 'survives-a-typo';
-  const { body } = await createSecret2(message, 'the-real-one');
+  const { body } = await createSecret(app, message, { passphrase: 'the-real-one' });
 
-  const wrong = await revealWith(body.token, 'not-it');
+  const wrong = await reveal(app, body.token, 'not-it');
   assert.equal(wrong.status, 401);
   assert.match(await wrong.text(), /was not correct/i);
 
   // Still there, and still openable with the right passphrase.
   assert.equal(app.db.countLive(body.token), 1);
 
-  const right = await revealWith(body.token, 'the-real-one');
+  const right = await reveal(app, body.token, 'the-real-one');
   assert.equal(right.status, 200);
   assert.match(await right.text(), new RegExp(message));
 });
 
 test('omitting the passphrase entirely does not destroy it either', async () => {
-  const { body } = await createSecret2('needs-a-passphrase', 'sesame');
+  const { body } = await createSecret(app, 'needs-a-passphrase', { passphrase: 'sesame' });
 
   const response = await reveal(app, body.token);
   assert.equal(response.status, 401);
@@ -302,38 +328,38 @@ test('omitting the passphrase entirely does not destroy it either', async () => 
 });
 
 test('five wrong attempts destroy the secret', async () => {
-  const { body } = await createSecret2('brute-force-target', 'the-real-one');
+  const { body } = await createSecret(app, 'brute-force-target', { passphrase: 'the-real-one' });
 
   for (let attempt = 1; attempt <= 4; attempt += 1) {
-    const response = await revealWith(body.token, `guess-${attempt}`);
+    const response = await reveal(app, body.token, `guess-${attempt}`);
     assert.equal(response.status, 401, `attempt ${attempt} should be rejected, not fatal`);
   }
   assert.equal(app.db.countLive(body.token), 1, 'should survive four wrong guesses');
 
-  const fifth = await revealWith(body.token, 'guess-5');
+  const fifth = await reveal(app, body.token, 'guess-5');
   assert.equal(fifth.status, 404);
   assert.match(await fifth.text(), /too many incorrect passphrases/i);
   assert.equal(app.db.countLive(body.token), 0, 'the fifth wrong guess destroys it');
 
   // Even the correct passphrase cannot bring it back.
-  const tooLate = await revealWith(body.token, 'the-real-one');
+  const tooLate = await reveal(app, body.token, 'the-real-one');
   assert.equal(tooLate.status, 404);
 });
 
 test('the server alone cannot read a passphrase-protected secret', async () => {
   const message = 'operator-should-not-see-this';
-  const { body } = await createSecret2(message, 'a-good-passphrase');
+  const { body } = await createSecret(app, message, { passphrase: 'a-good-passphrase' });
 
   // Unwrap the outer layer exactly as the operator could, holding SECRET_KEY.
   const row = app.db.db.prepare('SELECT payload FROM secrets WHERE token = ?').get(body.token);
-  const unwrapped = crypto2.decrypt(row.payload);
+  const unwrapped = serverCrypto.decrypt(row.payload);
 
   assert.ok(!unwrapped.includes(message), 'the plaintext must not survive the outer unwrap');
   assert.match(unwrapped, /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/);
 });
 
 test('a passphrase shorter than the minimum is rejected', async () => {
-  const { status, body } = await createSecret2('too weak', 'ab');
+  const { status, body } = await createSecret(app, 'too weak', { passphrase: 'ab' });
 
   assert.equal(status, 400);
   assert.match(body.error, /at least/i);
@@ -343,9 +369,82 @@ test('a passphrase on one secret does not affect unprotected ones', async () => 
   const { body } = await createSecret(app, 'no passphrase here');
 
   // A passphrase supplied for a secret that has none is simply ignored.
-  const response = await revealWith(body.token, 'irrelevant');
+  const response = await reveal(app, body.token, 'irrelevant');
   assert.equal(response.status, 200);
   assert.match(await response.text(), /no passphrase here/);
+});
+
+/* ------------------------------------------------ end-to-end (browser) mode */
+
+test('an end-to-end secret round-trips, and only the key holder can read it', async () => {
+  const message = 'e2e: sk-live-🔥-café';
+  const { status, body, key } = await createEncryptedSecret(app, message);
+
+  assert.equal(status, 201);
+  assert.equal(body.endToEnd, true);
+  assert.ok(!body.url.includes('#'), 'the server must not put a key in the link');
+
+  const response = await reveal(app, body.token);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.ok(!html.includes(message), 'the page must carry ciphertext, never plaintext');
+
+  // What the browser does on that page, with the key from the fragment.
+  assert.equal(await e2e.decryptMessage(ciphertextFrom(html), key), message);
+  assert.equal(app.db.countLive(body.token), 0);
+});
+
+test('the server key alone yields only the browser ciphertext', async () => {
+  const message = 'operator-cannot-read-e2e';
+  const { body, ciphertext } = await createEncryptedSecret(app, message);
+
+  // Exactly what an operator holding SECRET_KEY could recover from the row.
+  const row = app.db.db.prepare('SELECT payload FROM secrets WHERE token = ?').get(body.token);
+  const unwrapped = serverCrypto.decrypt(row.payload);
+
+  assert.equal(unwrapped, ciphertext);
+  assert.ok(!unwrapped.includes(message));
+});
+
+test('the wrong key cannot decrypt an end-to-end secret', async () => {
+  const { body } = await createEncryptedSecret(app, 'needs-the-right-key');
+  const { key: otherKey } = await e2e.encryptMessage('unrelated');
+
+  const html = await (await reveal(app, body.token)).text();
+
+  await assert.rejects(e2e.decryptMessage(ciphertextFrom(html), otherKey));
+});
+
+test('end-to-end and passphrase layers combine', async () => {
+  const message = 'belt-and-braces';
+  const { body, key } = await createEncryptedSecret(app, message, { passphrase: 'second factor' });
+
+  assert.equal(body.protected, true);
+  assert.equal((await reveal(app, body.token, 'wrong one')).status, 401);
+
+  const html = await (await reveal(app, body.token, 'second factor')).text();
+  assert.equal(await e2e.decryptMessage(ciphertextFrom(html), key), message);
+});
+
+test('malformed or oversized ciphertext is rejected', async () => {
+  const post = (ciphertext) =>
+    fetch(app.url('/api/secrets'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ciphertext })
+    });
+
+  assert.equal((await post('not base64url!')).status, 400);
+  assert.equal((await post('')).status, 400);
+  assert.equal((await post('AAAA')).status, 400, 'too short to hold an IV and a tag');
+  assert.equal((await post('A'.repeat(41_000))).status, 413);
+});
+
+test('the largest message the form allows still fits as ciphertext', async () => {
+  // 10,000 code units of 3-byte UTF-8 is the worst case the bound allows for.
+  const { status } = await createEncryptedSecret(app, '€'.repeat(10_000));
+  assert.equal(status, 201);
 });
 
 /* --------------------------------------------------------- storage ceiling */
@@ -416,6 +515,104 @@ test('the health endpoint is not rate limited', async () => {
     codes.every((code) => code === 200),
     `expected all 200s, got ${[...new Set(codes)].join(', ')}`
   );
+});
+
+/* ------------------------------------------------ no-JavaScript compose form */
+
+test('the compose form can never submit the plaintext as a GET', async () => {
+  // Without JavaScript, a form with no method is a GET, and the browser puts
+  // every field in the URL — /?message=<the secret>. The button must start
+  // disabled (main.js enables it) and the method must be POST.
+  const html = await (await fetch(app.url('/'))).text();
+
+  const form = html.match(/<form[^>]*data-secret-form[^>]*>/)?.[0] ?? '';
+  const button = html.match(/<button[^>]*data-submit[^>]*>/)?.[0] ?? '';
+
+  assert.match(form, /method="post"/);
+  assert.match(button, /\sdisabled[\s>]/);
+  assert.match(html, /<noscript>[\s\S]*Creating a secret needs JavaScript/);
+});
+
+/* --------------------------------------------- secrets the server can't open */
+
+/** Replaces a row's payload with one no configured key can decrypt. */
+function corrupt(token) {
+  const unreadable = `${'00'.repeat(12)}:${'00'.repeat(16)}:abcdef`;
+  app.db.db.prepare('UPDATE secrets SET payload = ? WHERE token = ?').run(unreadable, token);
+}
+
+/** Runs fn with console.error captured; returns what was written. */
+async function captureErrors(fn) {
+  const written = [];
+  const real = console.error;
+  console.error = (...args) => written.push(args.map(String).join(' '));
+  try {
+    await fn();
+  } finally {
+    console.error = real;
+  }
+  return written.join('\n');
+}
+
+test('a secret the server cannot decrypt is reported as unreadable, not as a passphrase problem', async () => {
+  // E.g. SECRET_KEY changed without SECRET_KEY_PREVIOUS. This used to count as
+  // a wrong passphrase: the page asked for a passphrase the secret never had,
+  // and five tries destroyed it.
+  const { body } = await createSecret(app, 'written under an old key');
+  corrupt(body.token);
+
+  let response;
+  const logged = await captureErrors(async () => {
+    response = await reveal(app, body.token);
+  });
+  const html = await response.text();
+
+  assert.equal(response.status, 500);
+  assert.match(html, /can.t be opened/);
+  assert.doesNotMatch(html, /passphrase-protected/);
+
+  // Nothing counted, nothing destroyed — restoring the key would make it readable.
+  const row = app.db.db.prepare('SELECT attempts FROM secrets WHERE token = ?').get(body.token);
+  assert.equal(row.attempts, 0);
+  assert.equal(app.db.countLive(body.token), 1);
+
+  // The operator is told, without the token.
+  assert.match(logged, /could not be decrypted/);
+  assert.ok(!logged.includes(body.token), 'the token must not be logged');
+});
+
+test('an unreadable passphrase secret does not use up attempts either', async () => {
+  const { body } = await createSecret(app, 'protected, old key', { passphrase: 'the-real-one' });
+  corrupt(body.token);
+
+  await captureErrors(async () => {
+    for (let i = 0; i < 6; i += 1) {
+      assert.equal((await reveal(app, body.token, 'the-real-one')).status, 500);
+    }
+  });
+
+  const row = app.db.db.prepare('SELECT attempts FROM secrets WHERE token = ?').get(body.token);
+  assert.equal(row.attempts, 0, 'six tries, none counted');
+  assert.equal(app.db.countLive(body.token), 1, 'still there');
+});
+
+/* ----------------------------------------------------------- created time */
+
+test('the secret page carries its creation time as unambiguous UTC', async () => {
+  // SQLite's "YYYY-MM-DD HH:MM:SS" has no zone; parsed as-is, a browser reads
+  // it as local time and shifts it by the reader's offset. The page must hand
+  // over an ISO string with an explicit Z for main.js to localise correctly.
+  const { body } = await createSecret(app, 'when was this made');
+  const html = await (await reveal(app, body.token)).text();
+
+  const iso = html.match(/<time[^>]*datetime="([^"]+)"/)?.[1];
+  assert.match(iso ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+  const skew = Math.abs(Date.parse(iso) - Date.now());
+  assert.ok(skew < 60_000, `created time should be about now, off by ${skew}ms`);
+
+  // Readable without JavaScript too: the server's fallback text states UTC.
+  assert.match(html, /created \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/);
 });
 
 /* ---------------------------------------------------------------- headers */

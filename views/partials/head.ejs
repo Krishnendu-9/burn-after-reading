@@ -16,17 +16,23 @@
 <meta name="description" content="Share a password or API key through a link that works exactly once, then destroys itself." />
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#08080a" media="(prefers-color-scheme: dark)" />
-<meta property="og:title" content="🔥 Burn After Reading" />
+<meta property="og:title" content="Burn After Reading" />
 <meta property="og:description" content="One-time secret links. Encrypted with AES-256-GCM, deleted on first read." />
 <meta property="og:type" content="website" />
 
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>" />
+<!-- The same flame as the header logo, so the tab matches the page. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='12' fill='%23171717'/><path transform='translate(4.2 4.2) scale(.65)' fill='none' stroke='%23f97316' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5Z'/></svg>" />
 
 <script nonce="<%= nonce %>">
   // Inline and blocking on purpose: applies the saved theme before first paint
   // so there is no white flash on a dark-mode load. The nonce is what lets this
   // through the Content-Security-Policy without opening up 'unsafe-inline'.
+  //
+  // It also marks the page as scripted, before first paint, so controls that
+  // only work with JavaScript ([data-requires-js]) are hidden without it — no
+  // dead buttons, and no pop-in when the main script loads.
   (function () {
+    document.documentElement.classList.add('js');
     try {
       var saved = localStorage.getItem('theme');
       var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

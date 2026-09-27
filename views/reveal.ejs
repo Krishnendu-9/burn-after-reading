@@ -7,82 +7,168 @@
     <%- include('partials/backdrop') %>
     <%- include('partials/nav') %>
 
-    <main class="mx-auto w-full max-w-xl px-6 pt-16">
-      <section class="surface animate-rise px-6 py-12 text-center shadow-xl shadow-neutral-900/5 sm:px-10 dark:shadow-black/40">
-        <div class="relative mx-auto mb-7 h-14 w-14" aria-hidden="true">
-          <div class="absolute inset-0 rounded-full bg-gradient-to-br from-amber-400/30 to-orange-600/20 blur-xl animate-flicker"></div>
-          <div class="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-orange-500">
-              <rect x="3" y="11" width="18" height="10" rx="2" />
-              <path d="M8 11V7a4 4 0 0 1 8 0" />
-            </svg>
+    <!--
+      No timestamps, expiry or sender details anywhere on this page, on purpose.
+      It is served for every token, real or not, so that fetching it proves
+      nothing about whether a secret is still waiting. Showing "created at"
+      would give that away.
+    -->
+    <main class="mx-auto w-full max-w-6xl px-5 sm:px-6 lg:px-8">
+      <!--
+        Same layout as the home page. One column below xl — intro, checklist,
+        then the action panel. From xl up, two equal columns: intro and checklist
+        on the left, the action panel on the right, stretched to their full
+        height so both sides line up top and bottom.
+      -->
+      <div class="mx-auto grid max-w-lg gap-y-8 pt-14 sm:pt-20 xl:max-w-none xl:grid-cols-2 xl:gap-x-16 xl:gap-y-10 xl:pt-24">
+        <section class="animate-rise text-center xl:col-start-1 xl:row-start-1 xl:self-end xl:text-left">
+          <h1 class="text-3xl font-bold tracking-tight text-balance sm:text-4xl xl:text-5xl xl:leading-[1.1]">
+            Someone sent you a <span class="text-gradient">secret</span>
+          </h1>
+
+          <p class="mx-auto mt-4 max-w-md text-base leading-relaxed text-pretty text-neutral-600 xl:mx-0 xl:mt-5 xl:text-lg dark:text-neutral-400">
+            <%# Worded to hold for every link: only end-to-end ones are decrypted in
+                the browser, and this page can't know which kind it is. %>
+            It opens once. Revealing it shows it to you here and deletes it from
+            the server for good.
+          </p>
+        </section>
+
+        <section class="animate-rise [animation-delay:60ms] xl:col-start-1 xl:row-start-2 xl:self-start">
+          <p class="text-xs font-semibold tracking-[0.14em] text-neutral-500 uppercase dark:text-neutral-400">
+            Before you reveal
+          </p>
+          <ul class="mt-4 space-y-4 xl:mt-5 xl:space-y-5">
+            <%
+              const checklist = [
+                { icon: 'eye', title: 'Be somewhere private', body: 'It’s shown in full on this screen.' },
+                { icon: 'copy', title: 'Be ready to copy it', body: 'This link can’t be opened again.' }
+              ];
+            %>
+            <% checklist.forEach(function (item) { %>
+            <li class="flex items-start gap-3 xl:gap-4">
+              <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-600 xl:h-10 xl:w-10 dark:text-orange-400">
+                <%- include('partials/icon', { icon: item.icon }) %>
+              </span>
+              <span>
+                <span class="block text-sm font-semibold xl:text-base"><%= item.title %></span>
+                <span class="block text-sm text-neutral-600 dark:text-neutral-400"><%= item.body %></span>
+              </span>
+            </li>
+            <% }); %>
+          </ul>
+        </section>
+
+        <section class="surface animate-rise flex flex-col justify-center p-6 shadow-xl shadow-neutral-900/5 [animation-delay:120ms] sm:p-7 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:p-9 dark:shadow-black/40">
+          <div class="relative mx-auto mb-6 h-14 w-14" aria-hidden="true">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-amber-400/30 to-orange-600/20 blur-xl animate-flicker"></div>
+            <div class="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
+              <%- include('partials/icon', { icon: 'lock', cls: 'h-6 w-6 text-orange-500' }) %>
+            </div>
           </div>
-        </div>
 
-        <h1 class="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-          Someone sent you a <span class="text-gradient">secret</span>
-        </h1>
+          <!-- Revealed by main.js only when the link carries a #key. Checked in the
+               browser alone; the server never learns the answer. Nothing is shown
+               when there's no key, since this page can't tell a missing key from
+               a link that never had one. -->
+          <p
+            data-key-found
+            hidden
+            class="mb-5 flex items-center justify-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
+          >
+            <%- include('partials/icon', { icon: 'checkCircle', cls: 'h-3.5 w-3.5' }) %>
+            Decryption key found in this link
+          </p>
 
-        <p class="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
-          It can only be opened once. The moment you continue, it is decrypted, shown
-          to you, and permanently deleted from the server.
-        </p>
+          <% if (locals.error) { %>
+          <p
+            role="alert"
+            class="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm leading-relaxed text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300"
+          >
+            <%- include('partials/icon', { icon: 'alert', cls: 'mt-0.5 h-4 w-4' }) %><span><%= error %></span>
+          </p>
+          <% } %>
 
-        <% if (locals.error) { %>
-        <p
-          role="alert"
-          class="mx-auto mt-6 flex max-w-sm items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-left text-sm leading-relaxed text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300"
-        >
-          <span aria-hidden="true">⚠️</span><span><%= error %></span>
-        </p>
-        <% } %>
+          <form method="post" action="/s/<%= token %>" data-reveal-form>
+            <!--
+              Rendered for every token, never conditional. The server has no idea
+              whether this one needs a passphrase — it never looks the token up on
+              GET — and offering the field only when one is required would tell a
+              prober that the secret exists. It sits collapsed, because most
+              secrets have none, and opens by itself after a wrong or missing one.
+              A native <details>, so it works without JavaScript; the input is
+              submitted with the form whether the section is open or not.
+            -->
+            <details
+              class="group rounded-xl border border-neutral-200 bg-white/40 open:bg-white/70 dark:border-white/10 dark:bg-white/[0.02] dark:open:bg-white/[0.04]"
+              <%= locals.error ? 'open' : '' %>
+            >
+              <summary
+                class="flex cursor-pointer list-none items-center gap-2 rounded-xl px-3.5 py-3 text-sm font-medium text-neutral-700 select-none hover:text-neutral-950 dark:text-neutral-300 dark:hover:text-white [&::-webkit-details-marker]:hidden"
+              >
+                <%- include('partials/icon', { icon: 'key', cls: 'h-4 w-4 text-neutral-500' }) %>
+                I was given a passphrase
+                <%- include('partials/icon', { icon: 'chevronRight', cls: 'ml-auto h-4 w-4 text-neutral-500 transition-transform group-open:rotate-90' }) %>
+              </summary>
+              <div class="px-3.5 pb-3.5">
+                <label for="passphrase" class="sr-only">Passphrase</label>
+                <div data-passphrase-field class="relative">
+                  <input
+                    type="password"
+                    id="passphrase"
+                    name="passphrase"
+                    autocomplete="off"
+                    spellcheck="false"
+                    maxlength="<%= passphraseLength.max %>"
+                    placeholder="Enter the passphrase"
+                    <%= locals.error ? 'autofocus' : '' %>
+                    class="w-full rounded-lg border border-neutral-200 bg-white py-2.5 pr-11 pl-3 font-mono text-sm text-neutral-800 placeholder:font-sans placeholder:text-neutral-500 dark:border-white/10 dark:bg-black/30 dark:text-neutral-200"
+                  />
+                  <!-- data-requires-js: it needs main.js, and this page still works
+                       without JavaScript, where a dead button would mislead. -->
+                  <button
+                    type="button"
+                    data-toggle-passphrase
+                    data-requires-js
+                    aria-label="Show passphrase"
+                    aria-pressed="false"
+                    class="absolute top-1/2 right-1.5 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-neutral-500 transition hover:text-neutral-800 dark:hover:text-neutral-200"
+                  >
+                    <%- include('partials/icon', { icon: 'eye', cls: 'h-4 w-4', attrs: 'data-eye' }) %>
+                    <%- include('partials/icon', { icon: 'eyeOff', cls: 'hidden h-4 w-4', attrs: 'data-eye-off' }) %>
+                  </button>
+                </div>
+                <p class="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                  Leave this closed if the sender didn't give you one.
+                </p>
+              </div>
+            </details>
 
-        <form method="post" action="/s/<%= token %>" data-reveal-form class="mt-8">
-          <!--
-            Always shown, never conditional. The server has no idea whether this
-            token needs a passphrase — it never looks the token up on GET — and
-            asking only when one is required would tell a prober that the secret
-            exists. So the field is offered to everyone and simply ignored when
-            the secret has no passphrase.
-          -->
-          <div class="mx-auto max-w-xs text-left">
-            <label for="passphrase" class="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-              Passphrase <span class="font-normal">— only if the sender set one</span>
-            </label>
-            <input
-              type="password"
-              id="passphrase"
-              name="passphrase"
-              autocomplete="off"
-              spellcheck="false"
-              maxlength="200"
-              placeholder="Leave blank if you weren't given one"
-              class="mt-1.5 w-full rounded-xl border border-neutral-200 bg-white/60 px-3.5 py-2.5 font-mono text-sm text-neutral-800 placeholder:font-sans placeholder:text-neutral-400 dark:border-white/10 dark:bg-black/30 dark:text-neutral-200 dark:placeholder:text-neutral-600"
-            />
-          </div>
+            <!-- Worded for every link, since this page can't know which kind it is. -->
+            <noscript>
+              <p class="mt-4 flex items-start gap-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
+                <%- include('partials/icon', { icon: 'alert', cls: 'mt-px h-3.5 w-3.5' }) %>
+                <span>
+                  JavaScript is off. If your link has a “#” followed by a key, it was
+                  encrypted in the sender's browser and needs JavaScript to decrypt —
+                  revealing it now would destroy it unread. Turn JavaScript on first.
+                </span>
+              </p>
+            </noscript>
 
-          <button type="submit" data-reveal-submit class="btn-primary mt-5 w-full py-3 text-base sm:w-auto sm:px-8">
-            <span data-reveal-label>🔓 Reveal and destroy</span>
-          </button>
-        </form>
+            <button type="submit" data-reveal-submit class="btn-primary mt-4 w-full py-3 text-base">
+              <%- include('partials/icon', { icon: 'lockOpen' }) %>
+              <span data-reveal-label>Reveal and destroy</span>
+            </button>
+          </form>
 
-        <!--
-          No timestamps or expiry here on purpose. This page is served for every
-          token, real or not, so that fetching it proves nothing about whether a
-          secret is still waiting. Showing "created at" would give that away.
-        -->
-        <p class="mt-8 border-t border-neutral-200/70 pt-6 text-xs leading-relaxed text-neutral-400 dark:border-white/5 dark:text-neutral-600">
-          If this link has already been used or has expired, you'll find that out on
-          the next screen.
-        </p>
-      </section>
-
-      <p class="mx-auto mt-5 max-w-sm text-center text-xs leading-relaxed text-neutral-400 dark:text-neutral-600">
-        Make sure you're ready to copy it — there is no second chance, and no way to
-        ask the server for it again.
-      </p>
+          <p class="mt-5 text-center text-sm text-neutral-500 dark:text-neutral-400">
+            Already used or expired? You'll find out on the next screen.
+          </p>
+        </section>
+      </div>
     </main>
 
-    <%- include('partials/footer') %>
+    <%- include('partials/footer', { wide: true }) %>
   </body>
 </html>
