@@ -14,7 +14,7 @@ data
 .github
 .claude
 test
-dev_docs.md
+dev_docs/
 README.md
 Dockerfile
 .dockerignore

@@ -11,4 +11,4 @@ data/
 npm-debug.log*
 
 # Private developer notes — kept local, not part of the public repo.
-dev_docs.md
+dev_docs/
