@@ -377,4 +377,4 @@ this earns misplaced trust when it stays vague.
 
 ## License
 
-MIT
+[MIT](LICENSE)

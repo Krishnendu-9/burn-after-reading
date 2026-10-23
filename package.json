@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "One-time, self-destructing secret links. Express + better-sqlite3 + AES-256-GCM.",
   "scripts": {
     "dev": "concurrently -k -n vite,server -c magenta,cyan \"vite build --watch\" \"node --watch server.js\"",
     "build": "vite build",
     "start": "node server.js",
+    "pretest": "npm run build",
     "test": "node --test \"test/*.test.js\"",
     "keygen": "node scripts/keygen.js"
   },

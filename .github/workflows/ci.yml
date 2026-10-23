@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # New advisories are published whether or not anyone pushes. A weekly run
+  # surfaces them on a quiet repo instead of on the next unrelated PR.
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      # Let both versions finish, so a failure on one shows whether the other passes.
+      fail-fast: false
+      matrix:
+        # 22: what the Dockerfile ships and the floor package.json declares.
+        # 24: the current LTS. better-sqlite3 is a native module built per Node
+        #     ABI, so a major-version bump is the change most likely to break it.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      # Also builds the front end first (the pretest script): the pages read
+      # Vite's manifest from public/dist, which is not in git.
+      - name: Build and run tests
+        run: npm test
+        env:
+          # npm test itself is unchanged. These add a second reporter that
+          # records which file each test came from, next to the usual output.
+          NODE_OPTIONS: >-
+            --test-reporter=spec --test-reporter-destination=stdout
+            --test-reporter=./.github/ci/test-file-reporter.mjs
+            --test-reporter-destination=test-run.json
+
+      # Runs after a test failure too, so the log shows which file broke.
+      - name: Verify every test file ran
+        if: ${{ !cancelled() }}
+        run: node .github/ci/check-test-run.mjs test-run.json test
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # npm audit reads package-lock.json; it does not need node_modules.
+
+      # What ships in the Docker image (npm ci --omit=dev) and handles every
+      # request. The tree is small, so moderate rarely means noise here.
+      - name: Audit runtime dependencies (fail on moderate or above)
+        run: npm audit --omit=dev --audit-level=moderate
+
+      # Build tooling never reaches production, and most of its advisories are
+      # about vite's dev server, which this project does not run. Only critical
+      # (code execution, known malware) fails the build here.
+      - name: Audit all dependencies including dev (fail on critical)
+        if: ${{ !cancelled() }}
+        run: npm audit --audit-level=critical
