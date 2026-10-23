@@ -371,6 +371,58 @@ this earns misplaced trust when it stays vague.
   in those logs until they rotate. The `#key` of an end-to-end link is never
   sent, so it never reaches any log.
 
+## Known limitations
+
+These follow from the design, or from the platform under it. They are not on a
+to-do list: no change inside this project removes them, though how it is
+deployed can narrow some of them.
+
+- **Plaintext sits in ordinary JavaScript strings.** Wherever this app handles a
+  plaintext, it does so as a string: the parsed request body, the result of
+  decrypting, the rendered page. Strings are immutable and the engine copies them
+  freely, so they cannot be zeroed after use. They stay in the heap until garbage
+  collection reclaims the memory and something overwrites it, and until then they
+  can turn up in a core dump, a heap snapshot or a swap file. Zeroing the
+  `Buffer`s the cipher produces would not help, because the same bytes already
+  exist as strings. On the server this covers plaintext submissions and every
+  passphrase, which reaches the server even for end-to-end secrets. End-to-end
+  plaintext never reaches the server, but the browser holds it the same way: in
+  the textarea, the decrypted text and the page itself. Disabling core dumps and
+  swap on the host narrows this; it does not close it.
+- **A burn is a delete, not an erasure.** `DELETE` makes a row unreachable. It
+  does not overwrite the bytes, which can survive in SQLite's free pages and
+  write-ahead log until reused, and below that in filesystem journals, SSD
+  wear-levelling, snapshots and backups, none of which the app can reach.
+  SQLite's `secure_delete` would zero freed pages in the database file, but not
+  those other copies. What survives is ciphertext, so its safety rests on the
+  keys; see the next two points.
+- **No forward secrecy for server-encrypted secrets.** `SECRET_KEY` is
+  long-lived, and for a plaintext submission without a passphrase it is the only
+  key involved. Anyone who has a copy of the database (a backup, a snapshot, the
+  leftover bytes above) and later obtains `SECRET_KEY` can read every such
+  secret in that copy, including ones burned after the copy was taken. Rotating
+  the key does not reach copies that already exist.
+- **The attempt limit only holds online.** Five wrong passphrases destroy a
+  secret on the server. With a copy of the database and `SECRET_KEY`, the
+  passphrase layer can be attacked offline instead, at scrypt's cost per guess
+  and with no limit on attempts. For a secret that is not also end-to-end, the
+  strength of the passphrase is then all that is left.
+- **A link outlives its secret, and an end-to-end link carries its key.** Links
+  get copied to places the app cannot clean: chat history, the clipboard and
+  clipboard-history tools, browser history and sync. Once the secret is burned,
+  those copies are harmless only if the server's copy of the ciphertext is really
+  gone. An operator who kept a copy, or anyone holding a leftover one together
+  with `SECRET_KEY`, can decrypt an end-to-end secret whenever its link turns up.
+- **"You will know if someone got there first" only covers people using the
+  app.** The single read is enforced by the server deleting the row as it hands
+  it over, not by the cryptography. Anyone with read access to the database or
+  the server can copy a payload without burning it, so the recipient sees
+  nothing unusual. For an end-to-end secret that copy is useless without the
+  link, which is the point above.
+- **Nothing proves who created a secret.** Anyone can create one, so a link
+  from this instance says nothing about its sender. Identify the sender through
+  the channel the link arrived on, not the link.
+
 ## Other notes
 
 - **Rate limits** are per-IP over a 15-minute window: 20 creates, 60 reveals, 300
