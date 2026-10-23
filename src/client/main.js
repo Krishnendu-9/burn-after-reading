@@ -11,6 +11,7 @@ import '@fontsource/jetbrains-mono/latin-500.css';
 import './style.css';
 
 import * as e2e from './e2e.js';
+import * as linkKey from './link-key.js';
 
 /* ---------------------------------------------------------------- theming */
 
@@ -256,17 +257,40 @@ if (form) {
 // firing two POSTs, where the second would land on an already-burned row.
 const revealForm = document.querySelector('[data-reveal-form]');
 
-if (revealForm) {
-  // An end-to-end link keeps its key in the #fragment, and a form POST lands on
-  // a URL without one unless the action carries it. Browsers still never send a
-  // fragment to the server; this only keeps it in the address bar of the page
-  // that comes back, where the decrypt step below reads it.
-  if (location.hash.length > 1) {
-    revealForm.action = `${revealForm.getAttribute('action')}${location.hash}`;
-    // Reassurance that the link arrived whole. Read from the address bar only;
-    // nothing about it is sent anywhere.
-    document.querySelector('[data-key-found]')?.removeAttribute('hidden');
+// sessionStorage can throw on access where storage is blocked; link-key.js
+// treats null as unavailable.
+const tabStorage = (() => {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
   }
+})();
+
+if (revealForm) {
+  const baseAction = revealForm.getAttribute('action');
+  const keyFound = document.querySelector('[data-key-found]');
+
+  // An end-to-end link keeps its key in the #fragment. It leaves this page's
+  // URL as the page loads and waits in sessionStorage for the page that ends
+  // the reveal (see link-key.js), so no history entry keeps it. Run again on
+  // hashchange, for a link pasted into a tab already on this page, and on a
+  // back/forward cache restore, by which time the reveal may have used it up.
+  const applyKey = () => {
+    const { key, inUrl } = linkKey.takeKey(location, history, tabStorage);
+    // Only when storage failed does the key still need to travel in the URL.
+    // Browsers never send a fragment to the server either way.
+    revealForm.action = inUrl ? `${baseAction}#${key}` : baseAction;
+    // Reassurance that the link arrived whole. Checked in the browser only;
+    // nothing about it is sent anywhere.
+    keyFound?.toggleAttribute('hidden', !key);
+  };
+
+  applyKey();
+  window.addEventListener('hashchange', applyKey);
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) applyKey();
+  });
 
   const toggle = revealForm.querySelector('[data-toggle-passphrase]');
   const setPassphraseVisible = toggle ? bindPassphraseToggle(toggle) : null;
@@ -284,15 +308,19 @@ if (revealForm) {
 
 /* ------------------------------------------------------ end-to-end decrypt */
 
-// The server handed back ciphertext it cannot read; the key is in the fragment.
+// The pages that end a reveal (the secret itself, or the "destroyed" page) carry
+// data-reveal-ended. The row is gone or out of reach by then, so the key leaves
+// storage and this page's URL here, whether or not the page has a use for it.
+// Others under /s/, such as the rate-limit page, leave it for the next attempt.
+const revealEndKey = document.body.hasAttribute('data-reveal-ended')
+  ? linkKey.releaseKey(location, history, tabStorage)
+  : null;
+
+// The server handed back ciphertext it cannot read; the key came with the link.
 const sealedBody = document.querySelector('[data-secret][data-ciphertext]');
 
 if (sealedBody) {
-  const key = location.hash.slice(1);
-
-  // The row is already deleted, so the key is useless now — but there is no
-  // reason to leave it in the address bar or the history either.
-  history.replaceState(null, '', `${location.pathname}${location.search}`);
+  const key = revealEndKey;
 
   const fail = (text) => {
     sealedBody.textContent = text;

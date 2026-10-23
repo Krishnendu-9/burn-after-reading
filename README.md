@@ -36,7 +36,7 @@ npm start
 npm test
 ```
 
-71 tests on Node's built-in runner, no framework. Each run gets a throwaway SQLite
+87 tests on Node's built-in runner, no framework. Each run gets a throwaway SQLite
 file and a fresh key. They cover the guarantees the whole project rests on:
 
 - a secret reveals exactly once, and the row is genuinely gone from disk after
@@ -50,6 +50,10 @@ file and a fresh key. They cover the guarantees the whole project rests on:
 - an end-to-end secret round-trips through the same `e2e.js` the browser runs,
   and the server's key alone recovers nothing but browser ciphertext
 - the operator's key alone cannot read a passphrase-protected secret
+- an end-to-end key leaves no trace in the tab's history through reload, Back,
+  Back twice, a link pasted again, a wrong passphrase and a crash restore, run
+  against a model of the browser's history rules; and only the pages that end a
+  reveal are marked to let go of the key
 - a rotated key still reads secrets written under the previous one, and a secret
   the server can no longer decrypt is reported as such — never counted as a wrong
   passphrase, never destroyed
@@ -115,10 +119,16 @@ Browsers never send the fragment in a request, so the server never has the key
 `SECRET_KEY` and asserts it gets back exactly the browser's ciphertext and
 nothing more.
 
-Two details make the flow work. The reveal form's `action` has the fragment
-appended by script, because a form `POST` otherwise lands on a URL without it;
-and once decrypted, the key is stripped from the address bar and history, since
-the row is gone and the key has no further use.
+The key also stays out of the tab's history. As the confirmation page loads, it
+moves the key from its own URL into the tab's `sessionStorage`, where it
+survives a reload or a restored session until the reveal. The page that ends the
+reveal (the secret, or "destroyed") takes it from there and deletes it. So no
+entry that Back, Forward or a restored tab would bring back holds the key, and
+it never appears in any URL after the first. What a page cannot change is the
+browser's own list of visited pages, which records the link as it was first
+opened; see [Known limitations](#known-limitations). If `sessionStorage` is
+blocked, the key stays in the URL as before, since losing it would destroy the
+secret unread.
 
 WebCrypto only exists in a secure context (HTTPS or `localhost`). On a plain-HTTP
 origin the form falls back to sending the plaintext for the server to encrypt,
@@ -209,6 +219,7 @@ src/logging.js            text/JSON logs with tokens redacted
 src/env.js                env readers that treat blank values as unset
 src/assets.js             resolves Vite's hashed filenames from the manifest
 src/client/e2e.js         browser-side encryption (WebCrypto), also run by the tests
+src/client/link-key.js    keeps the #key out of the tab's history, also run by the tests
 src/client/main.js        form submission, reveal, decrypt, theme, copy-to-clipboard
 src/client/style.css      Tailwind entry + component utilities
 views/                    index · reveal · secret · destroyed · too-many (EJS)
@@ -409,7 +420,9 @@ deployed can narrow some of them.
   strength of the passphrase is then all that is left.
 - **A link outlives its secret, and an end-to-end link carries its key.** Links
   get copied to places the app cannot clean: chat history, the clipboard and
-  clipboard-history tools, browser history and sync. Once the secret is burned,
+  clipboard-history tools, and the browser's list of visited pages, which
+  records the link, key included, as it first loads and before any script on
+  the page can run (and syncs it, where sync is on). Once the secret is burned,
   those copies are harmless only if the server's copy of the ciphertext is really
   gone. An operator who kept a copy, or anyone holding a leftover one together
   with `SECRET_KEY`, can decrypt an end-to-end secret whenever its link turns up.
