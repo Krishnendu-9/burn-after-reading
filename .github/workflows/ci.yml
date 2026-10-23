@@ -59,6 +59,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: node .github/ci/check-test-run.mjs test-run.json test
 
+  # Its own job: lint results don't depend on the Node version, so running it
+  # in the test matrix would only repeat it, and a lint failure stays visible
+  # separately from test results.
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-24.04
