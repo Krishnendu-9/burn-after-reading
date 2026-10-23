@@ -14,8 +14,31 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 export const db = new Database(DB_PATH);
 
-// WAL keeps reads from blocking the write that burns a secret.
-db.pragma('journal_mode = WAL');
+/**
+ * WAL keeps reads from blocking the write that burns a secret.
+ *
+ * Switching a brand-new file to WAL needs every other connection out of the way,
+ * and SQLite answers SQLITE_BUSY at once instead of waiting out the busy timeout.
+ * That only happens when several processes open a new database together, such
+ * as cluster mode on first boot, so retry briefly rather than crash the worker.
+ * Once the file is in WAL mode it stays there, and this succeeds first time.
+ */
+function enableWal() {
+  const deadline = Date.now() + 5_000;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+
+  for (;;) {
+    try {
+      db.pragma('journal_mode = WAL');
+      return;
+    } catch (error) {
+      if (error.code !== 'SQLITE_BUSY' || Date.now() >= deadline) throw error;
+      Atomics.wait(pause, 0, 0, 25); // a synchronous 25 ms pause; this runs once, at startup
+    }
+  }
+}
+
+enableWal();
 
 // `token` needs no index of its own: UNIQUE already creates one.
 db.exec(`
