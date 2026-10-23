@@ -1,0 +1,10 @@
+# Store text with LF and check it out with LF everywhere, Windows included.
+# text=auto alone still leaves working-tree endings to each machine's
+# core.autocrlf, so on Windows every LF save would warn "LF will be replaced by
+# CRLF"; eol=lf ends that and keeps the files identical on every platform.
+* text=auto eol=lf
+
+# YAML must be LF for GitHub Actions and Compose; stated outright so it never
+# depends on detection.
+*.yml  text eol=lf
+*.yaml text eol=lf
