@@ -40,28 +40,6 @@ function enableWal() {
 
 enableWal();
 
-// `token` needs no index of its own: UNIQUE already creates one.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS secrets (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    token       TEXT    NOT NULL UNIQUE,
-    payload     TEXT    NOT NULL,
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at  TEXT    NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_secrets_expires_at ON secrets (expires_at);
-
-  -- Older databases carry a second, redundant index on token.
-  DROP INDEX IF EXISTS idx_secrets_token;
-`);
-
-// Additive migrations for databases created before these columns existed.
-// SQLite has no "ADD COLUMN IF NOT EXISTS", so check what is already there.
-const existingColumns = new Set(
-  db.prepare('PRAGMA table_info(secrets)').all().map((column) => column.name)
-);
-
 const addedColumns = {
   requires_passphrase: 'INTEGER NOT NULL DEFAULT 0',
   attempts: 'INTEGER NOT NULL DEFAULT 0',
@@ -70,11 +48,47 @@ const addedColumns = {
   client_encrypted: 'INTEGER NOT NULL DEFAULT 0'
 };
 
-for (const [name, definition] of Object.entries(addedColumns)) {
-  if (!existingColumns.has(name)) {
-    db.exec(`ALTER TABLE secrets ADD COLUMN ${name} ${definition}`);
+/**
+ * Creates the table and adds any columns an older database lacks.
+ *
+ * One immediate transaction, for the same reason as the store's increment():
+ * the migration reads the columns and then alters the table, and two processes
+ * opening a new file together could both see a column missing, so the second
+ * ALTER failed with "duplicate column name" (SQLITE_ERROR) and that process
+ * crashed at startup. Taking the write lock first makes the second process wait,
+ * then find the columns already there.
+ */
+const migrate = db.transaction(() => {
+  // `token` needs no index of its own: UNIQUE already creates one.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS secrets (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      token       TEXT    NOT NULL UNIQUE,
+      payload     TEXT    NOT NULL,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      expires_at  TEXT    NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_secrets_expires_at ON secrets (expires_at);
+
+    -- Older databases carry a second, redundant index on token.
+    DROP INDEX IF EXISTS idx_secrets_token;
+  `);
+
+  // Additive migrations for databases created before these columns existed.
+  // SQLite has no "ADD COLUMN IF NOT EXISTS", so check what is already there.
+  const existingColumns = new Set(
+    db.prepare('PRAGMA table_info(secrets)').all().map((column) => column.name)
+  );
+
+  for (const [name, definition] of Object.entries(addedColumns)) {
+    if (!existingColumns.has(name)) {
+      db.exec(`ALTER TABLE secrets ADD COLUMN ${name} ${definition}`);
+    }
   }
-}
+});
+
+migrate.immediate();
 
 /**
  * Wrong passphrases allowed before the secret is destroyed.
