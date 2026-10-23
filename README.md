@@ -357,6 +357,15 @@ this earns misplaced trust when it stays vague.
   would mean a single typo silently destroys the secret from the user's point of
   view, which is worse. If you need the stronger property, don't set a
   passphrase.
+- **Destruction by someone who has the link but not the passphrase.** Five wrong
+  passphrases destroy a protected secret, and a `POST` with no passphrase counts
+  as wrong, so whoever intercepts the link can destroy the secret even though
+  they cannot read it. Without the limit they could do nothing to it, but
+  they could keep guessing from as many addresses as they liked for the whole
+  TTL. The trade is deliberate: a passphrase turns an intercepted link from
+  disclosure into, at worst, destruction. The recipient finds the secret already
+  gone, which tells them the link was exposed; the fix is a new link sent over a
+  better channel.
 - **Server-side logs.** Your reverse proxy or platform may log request paths,
   which include the token. The token is worthless after the burn, but it exists
   in those logs until they rotate. The `#key` of an end-to-end link is never

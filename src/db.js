@@ -54,11 +54,29 @@ for (const [name, definition] of Object.entries(addedColumns)) {
 }
 
 /**
- * Wrong passphrases allowed before the secret is destroyed. Bounds an online
- * guessing attack, and restores the property that probing a link is not free:
- * a prober who keeps getting it wrong ends up burning the thing they were
- * probing. Anyone holding the link could destroy it by revealing it anyway, so
- * this adds no denial-of-service that was not already available.
+ * Wrong passphrases allowed before the secret is destroyed.
+ *
+ * It bounds online guessing per secret, however many addresses the guesses
+ * come from. Rate limits are per address, so on their own they would let a
+ * guesser spread across many addresses keep going for the whole TTL, up to a
+ * week, and a short passphrase would not survive that.
+ *
+ * It also bounds probing. A wrong passphrase answers 401 where a missing secret
+ * answers 404, so every attempt confirms the secret is still unread. A request
+ * with no passphrase at all counts as wrong for the same reason; otherwise that
+ * check would be free and unlimited.
+ *
+ * The cost is a denial of service that only exists because of this limit. For an
+ * unprotected secret nothing changes, since anyone holding the link can already
+ * destroy it by reading it. For a protected one it is new: someone who has the
+ * link but not the passphrase could not otherwise touch the secret, and with the
+ * limit five POSTs destroy it. That is accepted on purpose. The passphrase is
+ * there so that an intercepted link does not disclose the secret, and the limit
+ * is what keeps that true; the price is that interception can still end in
+ * destruction. Destruction is visible, because the recipient finds the secret
+ * already gone, and recoverable, because the sender can send a new link over a
+ * better channel. Unbounded guessing would instead end in disclosure, which
+ * nothing undoes.
  */
 export const MAX_PASSPHRASE_ATTEMPTS = 5;
 
