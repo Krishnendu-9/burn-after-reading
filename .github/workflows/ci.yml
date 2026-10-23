@@ -82,6 +82,55 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  # The tests run with every dependency installed; the image installs
+  # production dependencies only and copies a subset of the files. This is the
+  # one place that starts the app the way production does, so a runtime import
+  # left in devDependencies, a file .dockerignore drops, or a broken HEALTHCHECK
+  # fails here instead of on the server. Nothing is pushed.
+  docker:
+    name: Docker image (build and smoke test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        run: docker build --tag burn-after-reading:ci .
+
+      # A throwaway key that exists only for this run. The health check runs
+      # every 2 s here instead of 30 s, so its result is known quickly.
+      - name: Start it with a throwaway key
+        run: |
+          docker run --detach --name smoke --publish 3000:3000 \
+            --env SECRET_KEY="$(openssl rand -hex 32)" \
+            --env BASE_URL=http://localhost:3000 \
+            --health-interval 2s --health-start-period 5s \
+            burn-after-reading:ci
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: "Smoke test: health, create a secret, reveal it once"
+        run: node .github/ci/smoke-test.mjs http://localhost:3000
+
+      - name: The image's own health check passes, and it runs as node
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' smoke)
+            [ "$status" = healthy ] && break
+            sleep 1
+          done
+          echo "HEALTHCHECK status: $status"
+          [ "$status" = healthy ]
+          [ "$(docker exec smoke id -un)" = node ]
+
+      - name: Container logs
+        if: ${{ !cancelled() }}
+        run: docker logs smoke
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-24.04
