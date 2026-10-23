@@ -36,7 +36,7 @@ npm start
 npm test
 ```
 
-67 tests on Node's built-in runner, no framework. Each run gets a throwaway SQLite
+71 tests on Node's built-in runner, no framework. Each run gets a throwaway SQLite
 file and a fresh key. They cover the guarantees the whole project rests on:
 
 - a secret reveals exactly once, and the row is genuinely gone from disk after
@@ -58,7 +58,8 @@ file and a fresh key. They cover the guarantees the whole project rests on:
 - the compose form can't submit on its own without JavaScript, so the plaintext
   can never end up in a URL
 - rate-limit counts survive a restart
-- tampered ciphertext throws instead of returning altered plaintext
+- tampered ciphertext throws instead of returning altered plaintext, and a
+  payload copied into another row will not decrypt there
 
 ## Interface
 
@@ -87,7 +88,11 @@ file and a fresh key. They cover the guarantees the whole project rests on:
 
 The server layer stores `iv:authTag:ciphertext`, all hex, with a fresh 96-bit IV
 per secret; the GCM auth tag means a tampered row fails to decrypt rather than
-returning garbage. Layers stack from the inside out:
+returning garbage. The row's token is authenticated too, as GCM associated data,
+so a payload copied into a different row fails the same way. Without that,
+anyone able to write to the database could move a secret into a row whose link
+they hold and read it there, leaving the original untouched. Layers stack from
+the inside out:
 
 ```
 browser key (in the #fragment)   AES-256-GCM, WebCrypto     — end-to-end secrets
@@ -233,7 +238,10 @@ CREATE TABLE rate_limits (
 ```
 
 The last three `secrets` columns are added by an in-place migration, so databases
-created by earlier versions keep working. An hourly sweep deletes expired rows
+created by earlier versions keep working. Rows written before payloads were bound
+to their tokens do not: they fail to decrypt and are reported as unreadable until
+their TTL runs out, a week at most. That break was deliberate; a fallback for
+them would have left every such payload movable. An hourly sweep deletes expired rows
 and elapsed rate-limit windows so nothing lingers on disk.
 
 ## Environment
@@ -302,8 +310,9 @@ this earns misplaced trust when it stays vague.
   for end-to-end secrets, useless even with it.
 - **Silent interception.** Reads are destructive and single-use, so if someone
   gets there first the recipient sees "already destroyed" — you find out.
-- **Tampering.** GCM authenticates the ciphertext; an edited row fails to
-  decrypt rather than returning altered plaintext.
+- **Tampering.** GCM authenticates the ciphertext and the token it belongs to;
+  an edited row fails to decrypt rather than returning altered plaintext, and so
+  does a payload copied in from another row.
 - **Preview bots.** Link unfurlers can't burn a secret, because burning needs a
   POST.
 - **Silent read receipts.** `GET` returns an identical page for every token, so

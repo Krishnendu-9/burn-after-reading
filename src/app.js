@@ -72,7 +72,7 @@ export function createApp({
   logRequests = true
 }) {
   // Fail fast on a missing or malformed SECRET_KEY rather than at the first POST.
-  encrypt('startup check');
+  encrypt('startup check', 'startup-check');
   // Same idea for the compiled front end: without it every page render throws a
   // confusing 500, so surface the real problem while the operator is still
   // looking at the terminal.
@@ -189,9 +189,10 @@ export function createApp({
     const content = clientEncrypted ? ciphertext : message;
 
     const token = crypto.randomUUID();
+    // Bound to the token, so the payload only decrypts in this row.
     const payload = passphrase
-      ? await encryptWithPassphrase(content, passphrase)
-      : encrypt(content);
+      ? await encryptWithPassphrase(content, passphrase, token)
+      : encrypt(content, token);
 
     createSecret({
       token,
@@ -246,13 +247,14 @@ export function createApp({
     // attempt, not the secret.
     const result = await burnSecret(req.params.token, (row) => {
       // The server layer first, on its own. Failing here is never the reader's
-      // doing — the key changed without rotation, or the row is damaged — so it
-      // is reported as unreadable instead of being counted as a wrong guess.
+      // doing — the key changed without rotation, or the row is damaged or holds
+      // a payload copied from another row — so it is reported as unreadable
+      // instead of being counted as a wrong guess.
       // Counting it used to tell the reader to enter a passphrase that a secret
       // without one could never accept, then destroy it after five tries.
       let inner;
       try {
-        inner = decrypt(row.payload);
+        inner = decrypt(row.payload, req.params.token);
       } catch (error) {
         throw new UnreadableSecretError(error);
       }
@@ -271,9 +273,14 @@ export function createApp({
       logEvent(
         'error',
         'secret_unreadable',
-        { hint: 'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS.' },
+        {
+          hint:
+            'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS. ' +
+            'Otherwise the row was altered.'
+        },
         '[error] a secret could not be decrypted with any configured key — ' +
-          'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS.'
+          'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS. ' +
+          'Otherwise the row was altered.'
       );
       return res.status(500).render('destroyed', {
         heading: 'This secret can’t be opened',

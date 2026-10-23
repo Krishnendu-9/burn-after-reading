@@ -62,14 +62,39 @@ function getKey() {
 }
 
 /**
- * Encrypts plaintext with AES-256-GCM.
+ * The token a payload belongs to, as GCM additional authenticated data.
+ *
+ * Without it, a payload is valid in any row. Someone who can write to the
+ * database but does not hold SECRET_KEY could copy a secret's payload into a
+ * row whose link they hold, reveal that link, and get the plaintext, while the
+ * original row stays untouched and its recipient never learns. With the token
+ * bound in, a moved payload fails the tag check like any other tampering.
+ *
+ * Payloads written before this binding have no associated data, so they fail
+ * that check too. That break is deliberate and has no fallback: a decrypt that
+ * also accepted unbound payloads would leave every one of them movable, and at
+ * the time of the change no live secret was stored in the old form.
+ *
+ * Required rather than optional, so no caller can skip the binding by accident.
+ */
+function associatedData(token) {
+  if (typeof token !== 'string' || token === '') {
+    throw new Error('A payload must be bound to a token');
+  }
+  return Buffer.from(token, 'utf8');
+}
+
+/**
+ * Encrypts plaintext with AES-256-GCM, bound to the token it is stored under.
  * @returns {string} "iv:authTag:ciphertext", all hex encoded.
  */
-export function encrypt(plaintext) {
+export function encrypt(plaintext, token) {
+  const aad = associatedData(token);
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, getKey(), iv, {
     authTagLength: AUTH_TAG_LENGTH
   });
+  cipher.setAAD(aad);
 
   const ciphertext = Buffer.concat([
     cipher.update(String(plaintext), 'utf8'),
@@ -82,26 +107,31 @@ export function encrypt(plaintext) {
 /**
  * Reverses encrypt() using an explicit key.
  * @param {Buffer} key
+ * @param {Buffer} [aad] Associated data the payload was sealed with, if any.
  */
-function decryptWith(key, iv, authTag, ciphertext) {
+function decryptWith(key, iv, authTag, ciphertext, aad) {
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
     authTagLength: AUTH_TAG_LENGTH
   });
+  if (aad) decipher.setAAD(aad);
   decipher.setAuthTag(authTag);
 
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }
 
 /**
- * Reverses encrypt(). Throws if the payload was tampered with, or if none of the
- * configured keys can read it.
+ * Reverses encrypt(). Throws if the payload was tampered with, was written for a
+ * different token, or if none of the configured keys can read it.
  *
  * Each key is tried in turn. That is safe to do blindly because GCM authenticates
  * the ciphertext: a wrong key fails the tag check and throws, it never returns
  * plausible-looking rubbish. Normally the first key succeeds; the loop only does
  * real work during a rotation, for secrets written under the old key.
  */
-export function decrypt(payload) {
+export function decrypt(payload, token) {
+  // Before the loop, so a missing token is reported as itself rather than
+  // swallowed below as "no key could read it".
+  const aad = associatedData(token);
   const parts = String(payload).split(':');
   if (parts.length !== 3) {
     throw new Error('Malformed payload');
@@ -111,7 +141,7 @@ export function decrypt(payload) {
 
   for (const key of getKeys()) {
     try {
-      return decryptWith(key, iv, authTag, ciphertext);
+      return decryptWith(key, iv, authTag, ciphertext, aad);
     } catch {
       // Wrong key for this payload — try the next one.
     }
@@ -146,9 +176,12 @@ function deriveKey(passphrase, salt) {
  * operator can no longer read it: holding SECRET_KEY unwraps the outer layer and
  * yields nothing but the inner ciphertext.
  *
+ * Only the outer layer carries the token. The inner one cannot be moved without
+ * the outer, and is useless to anyone without the passphrase anyway.
+ *
  * @returns {Promise<string>} A normal payload whose plaintext is "salt:iv:authTag:ciphertext".
  */
-export async function encryptWithPassphrase(plaintext, passphrase) {
+export async function encryptWithPassphrase(plaintext, passphrase, token) {
   const salt = crypto.randomBytes(SALT_LENGTH);
   const key = await deriveKey(passphrase, salt);
 
@@ -166,7 +199,7 @@ export async function encryptWithPassphrase(plaintext, passphrase) {
     .map((b) => b.toString('hex'))
     .join(':');
 
-  return encrypt(inner);
+  return encrypt(inner, token);
 }
 
 /**
@@ -191,6 +224,6 @@ export async function openPassphraseLayer(inner, passphrase) {
 }
 
 /** Reverses encryptWithPassphrase(): the server layer, then the passphrase layer. */
-export async function decryptWithPassphrase(payload, passphrase) {
-  return openPassphraseLayer(decrypt(payload), passphrase);
+export async function decryptWithPassphrase(payload, passphrase, token) {
+  return openPassphraseLayer(decrypt(payload, token), passphrase);
 }

@@ -352,7 +352,7 @@ test('the server alone cannot read a passphrase-protected secret', async () => {
 
   // Unwrap the outer layer exactly as the operator could, holding SECRET_KEY.
   const row = app.db.db.prepare('SELECT payload FROM secrets WHERE token = ?').get(body.token);
-  const unwrapped = serverCrypto.decrypt(row.payload);
+  const unwrapped = serverCrypto.decrypt(row.payload, body.token);
 
   assert.ok(!unwrapped.includes(message), 'the plaintext must not survive the outer unwrap');
   assert.match(unwrapped, /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/);
@@ -401,7 +401,7 @@ test('the server key alone yields only the browser ciphertext', async () => {
 
   // Exactly what an operator holding SECRET_KEY could recover from the row.
   const row = app.db.db.prepare('SELECT payload FROM secrets WHERE token = ?').get(body.token);
-  const unwrapped = serverCrypto.decrypt(row.payload);
+  const unwrapped = serverCrypto.decrypt(row.payload, body.token);
 
   assert.equal(unwrapped, ciphertext);
   assert.ok(!unwrapped.includes(message));
@@ -594,6 +594,37 @@ test('an unreadable passphrase secret does not use up attempts either', async ()
   const row = app.db.db.prepare('SELECT attempts FROM secrets WHERE token = ?').get(body.token);
   assert.equal(row.attempts, 0, 'six tries, none counted');
   assert.equal(app.db.countLive(body.token), 1, 'still there');
+});
+
+test('a payload copied into another row does not decrypt there', async () => {
+  // Someone who can write to the database, but has no SECRET_KEY, copies a
+  // victim's payload into a row whose link they hold. If the payload were not
+  // bound to its token, revealing their own link would hand them the victim's
+  // secret and leave the victim's row intact, so the read would go unnoticed.
+  const message = 'moved-payload-target';
+  const victim = await createSecret(app, message);
+  const attacker = await createSecret(app, 'attacker-owned');
+
+  const { payload } = app.db.db
+    .prepare('SELECT payload FROM secrets WHERE token = ?')
+    .get(victim.body.token);
+  app.db.db
+    .prepare('UPDATE secrets SET payload = ? WHERE token = ?')
+    .run(payload, attacker.body.token);
+
+  let response;
+  await captureErrors(async () => {
+    response = await reveal(app, attacker.body.token);
+  });
+  const html = await response.text();
+
+  assert.equal(response.status, 500, 'reported as unreadable');
+  assert.ok(!html.includes(message), 'the victim plaintext must not be served');
+
+  // The victim's own link is unaffected and still opens exactly once.
+  const genuine = await reveal(app, victim.body.token);
+  assert.equal(genuine.status, 200);
+  assert.match(await genuine.text(), new RegExp(message));
 });
 
 /* ----------------------------------------------------------- created time */
