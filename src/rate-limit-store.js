@@ -82,7 +82,13 @@ export class SqliteRateLimitStore {
       return { hits: existing.hits + 1, resetAt: existing.reset_at };
     });
 
-    const { hits, resetAt } = run();
+    // Immediate, for the same reason as recordFailedAttempt in db.js: it takes
+    // the write lock before the read. A deferred transaction reads first and
+    // then has to upgrade, and SQLite refuses that upgrade with SQLITE_BUSY,
+    // without waiting, whenever another connection has written in between.
+    // Immediate waits its turn instead (the 5 s busy timeout), so several
+    // processes sharing the file all get counted.
+    const { hits, resetAt } = run.immediate();
     return { totalHits: hits, resetTime: new Date(resetAt) };
   }
 

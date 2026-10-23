@@ -167,3 +167,24 @@ test(`${WORKERS} connections opening a brand-new database together all start`, a
 
   assert.deepEqual(failures, [], `${failures.length} of ${ROUNDS * WORKERS} workers failed to open`);
 });
+
+test(`${WORKERS} connections counting the same client at once: no errors, no lost hits`, async () => {
+  // A deferred transaction in the store made most of these fail with
+  // SQLITE_BUSY: it reads first, and SQLite refuses the later upgrade to a write
+  // without waiting whenever another connection wrote in between.
+  const INCREMENTS = 100;
+  const file = path.join(dir, 'counting.db');
+  const { startupErrors, errors, counted } = await cluster(file, INCREMENTS);
+
+  assert.deepEqual(startupErrors, []);
+  assert.equal(errors.length, 0, `${errors.length} increments threw, e.g. ${errors[0]}`);
+  assert.equal(counted, WORKERS * INCREMENTS);
+
+  // Read back through a connection of its own to the shared file.
+  const Database = (await import('better-sqlite3')).default;
+  const check = new Database(file, { readonly: true });
+  const { hits } = check.prepare('SELECT hits FROM rate_limits WHERE key = ?').get('cluster:203.0.113.7');
+  check.close();
+
+  assert.equal(hits, WORKERS * INCREMENTS, 'no hit may be lost');
+});
