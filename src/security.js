@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
  *
  * Everything the pages need is served from our own origin — fonts are bundled by
  * Vite rather than fetched from Google — so the only exceptions are `data:`
- * images (the emoji favicon and the CSS dropdown chevron) and a per-request
+ * images (the SVG favicon and the CSS dropdown chevron) and a per-request
  * nonce for the one inline script that applies the saved theme before paint.
  */
 function contentSecurityPolicy(nonce) {

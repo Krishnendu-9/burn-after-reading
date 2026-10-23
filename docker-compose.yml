@@ -34,7 +34,9 @@ services:
       # Absolute, and inside the mounted volume.
       DATABASE_PATH: /app/data/app.db
 
-      # Leave at 0 unless a reverse proxy really is in front — see README.
+      # Leave blank (off) unless a reverse proxy really is in front — see the
+      # README's Configuration section. Blank rather than 0: both trust nothing,
+      # but only blank lets the app warn in production that the setting is off.
       TRUST_PROXY: ${TRUST_PROXY:-}
 
       MAX_SECRETS: ${MAX_SECRETS:-}
