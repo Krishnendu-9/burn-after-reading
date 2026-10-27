@@ -13,9 +13,27 @@ const DB_PATH = configuredPath
   ? path.resolve(ROOT, configuredPath)
   : path.join(ROOT, 'data', 'app.db');
 
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+// Owner-only when this creates the folder. An existing one, such as a mounted
+// volume, keeps whatever permissions its owner gave it.
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true, mode: 0o700 });
 
 export const db = new Database(DB_PATH);
+
+/**
+ * The file holds only ciphertext, but nobody else on the machine needs even
+ * that. Done before WAL mode is switched on: SQLite creates the -wal and -shm
+ * files with the main file's permissions, so all three end up owner-only. The
+ * extra names cover a database first opened by an older version. Best effort:
+ * it fails harmlessly when the process does not own the file, and Windows
+ * ignores it.
+ */
+for (const suffix of ['', '-wal', '-shm']) {
+  try {
+    fs.chmodSync(`${DB_PATH}${suffix}`, 0o600);
+  } catch {
+    // Missing, or not ours to change.
+  }
+}
 
 /**
  * Deleted content is overwritten with zeros rather than left in free pages, so

@@ -140,6 +140,8 @@ docker run -d -p 3000:3000 -v bar-data:/app/data \
   burn-after-reading
 ```
 
+The database and its `-wal`/`-shm` files are made owner-only (`0600`) at startup.
+
 ## Threat model
 
 Being specific about this matters more than the encryption itself — a tool like

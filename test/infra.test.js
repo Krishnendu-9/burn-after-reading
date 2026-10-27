@@ -259,6 +259,19 @@ test('the sweep empties the write-ahead log, where burned pages linger', async (
   assert.equal(fs.statSync(wal).size, 0);
 });
 
+test('the database file is readable by its owner only', (t) => {
+  if (process.platform === 'win32') {
+    // Windows has no POSIX modes for chmod to set. CI runs this on Linux.
+    t.diagnostic('POSIX permissions: not applicable on Windows');
+    return;
+  }
+  for (const suffix of ['', '-wal', '-shm']) {
+    const file = `${process.env.DATABASE_PATH}${suffix}`;
+    if (!fs.existsSync(file)) continue;
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600, file);
+  }
+});
+
 test('createSecret refuses past maxRows, after reclaiming expired rows', () => {
   db.db.prepare('DELETE FROM secrets').run();
   const expired = db.db.prepare(
