@@ -18,6 +18,15 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 export const db = new Database(DB_PATH);
 
 /**
+ * Deleted content is overwritten with zeros rather than left in free pages, so
+ * a burned secret's ciphertext does not linger in the database file. The
+ * write-ahead log can still hold it until checkpointWal() resets the log, and
+ * the filesystem below SQLite is out of reach entirely; the README's known
+ * limitations cover both. A per-connection setting, so it is set on every open.
+ */
+db.pragma('secure_delete = ON');
+
+/**
  * WAL keeps reads from blocking the write that burns a secret.
  *
  * Switching a brand-new file to WAL needs every other connection out of the way,
@@ -304,14 +313,25 @@ export function pingDatabase() {
 }
 
 /**
- * Closes the database cleanly on shutdown. The WAL checkpoint folds the
- * write-ahead log back into the main file, so a container restart doesn't leave
- * `-wal` and `-shm` files behind for the next boot to recover.
+ * Folds the write-ahead log into the main file and truncates the log to zero
+ * bytes. Until then the log holds page images from before each burn, so
+ * secure_delete alone would leave a burned secret's ciphertext in the -wal
+ * file. Called by the hourly sweep and on shutdown. A checkpoint that finds
+ * readers in the way does what it can without failing; the next run finishes.
+ */
+export function checkpointWal() {
+  db.pragma('wal_checkpoint(TRUNCATE)');
+}
+
+/**
+ * Closes the database cleanly on shutdown. The checkpoint also means a
+ * container restart doesn't leave `-wal` and `-shm` files behind for the next
+ * boot to recover.
  */
 export function closeDatabase() {
   if (!db.open) return;
   try {
-    db.pragma('wal_checkpoint(TRUNCATE)');
+    checkpointWal();
   } finally {
     db.close();
   }

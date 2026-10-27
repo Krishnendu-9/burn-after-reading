@@ -206,11 +206,13 @@ deployed can narrow some of them.
   which reaches the server even for end-to-end secrets; the browser holds
   end-to-end plaintext the same way. Disabling core dumps and swap narrows this;
   it does not close it.
-- **A burn is a delete, not an erasure.** The bytes can survive in SQLite's free
-  pages and write-ahead log until reused, and below that in filesystem journals,
-  SSD wear-levelling, snapshots and backups, none of which the app can reach
-  (SQLite's `secure_delete` would only cover the database file). What survives is
-  ciphertext, so its safety rests on the keys; see the next two points.
+- **A burn is a delete, not an erasure.** SQLite's `secure_delete` is on, so a
+  burned row is zeroed in the database file, and the hourly sweep resets the
+  write-ahead log, but until then the log still holds the page as it was.
+  Below SQLite the bytes can survive in filesystem journals, SSD
+  wear-levelling, snapshots and backups, none of which the app can reach. What
+  survives is ciphertext, so its safety rests on the keys; see the next two
+  points.
 - **No forward secrecy for server-encrypted secrets.** `SECRET_KEY` is
   long-lived, and for a plaintext submission without a passphrase it is the only
   key involved. Anyone who has a copy of the database (a backup, a snapshot, the

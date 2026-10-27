@@ -1,7 +1,7 @@
 import './src/load-env.js';
 
 import { createApp } from './src/app.js';
-import { purgeExpired, closeDatabase } from './src/db.js';
+import { purgeExpired, checkpointWal, closeDatabase } from './src/db.js';
 import { purgeRateLimits } from './src/rate-limit-store.js';
 import { envNumber, envString, envFlag, envTrustProxy } from './src/env.js';
 import { configureLogging, logEvent } from './src/logging.js';
@@ -66,6 +66,9 @@ function sweepExpired() {
     }
     // Elapsed rate-limit windows are dead weight once their reset time passes.
     purgeRateLimits();
+    // Burned and purged secrets leave page images in the write-ahead log until
+    // it is reset; this empties it.
+    checkpointWal();
   } catch (error) {
     logEvent('error', 'purge_failed', { message: error.message }, `[purge] sweep failed, will retry next hour — ${error.message}`);
   }

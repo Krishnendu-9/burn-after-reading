@@ -202,6 +202,22 @@ test('every spelling of a secret URL is redacted, not just the lowercase one', (
 
 /* -------------------------------------------------------- what is on disk */
 
+test('deleted secrets are overwritten in the file, not just unlinked', () => {
+  assert.equal(db.db.pragma('secure_delete', { simple: true }), 1);
+});
+
+test('the sweep empties the write-ahead log, where burned pages linger', async () => {
+  const token = crypto.randomUUID();
+  db.createSecret({ token, payload: 'iv:tag:cipher', ttlHours: 1 });
+  await db.burnSecret(token, (row) => row.payload);
+
+  const wal = `${process.env.DATABASE_PATH}-wal`;
+  assert.ok(fs.statSync(wal).size > 0, 'the burn went through the log');
+
+  db.checkpointWal();
+  assert.equal(fs.statSync(wal).size, 0);
+});
+
 test('createSecret refuses past maxRows, after reclaiming expired rows', () => {
   db.db.prepare('DELETE FROM secrets').run();
   const expired = db.db.prepare(
