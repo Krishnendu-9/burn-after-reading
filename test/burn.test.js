@@ -798,6 +798,18 @@ test('the global rate limit answers the API in JSON, which the form can show', a
   assert.match((await response.json()).error, /too many requests/i);
 });
 
+/* ------------------------------------------------- passphrases on reveal */
+
+test('a passphrase longer than any that can be set counts as a wrong guess', async () => {
+  const { body } = await createSecret(app, 'length-capped', { passphrase: 'the-real-one' });
+
+  const response = await reveal(app, body.token, 'x'.repeat(50_000));
+  assert.equal(response.status, 401);
+
+  const row = app.db.db.prepare('SELECT attempts FROM secrets WHERE token = ?').get(body.token);
+  assert.equal(row.attempts, 1);
+});
+
 /* ------------------------------------------------- the compose form, on HTTP */
 
 test('the compose form carries the plain-HTTP warning, hidden until needed', async () => {

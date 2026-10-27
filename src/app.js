@@ -321,6 +321,9 @@ export function createApp({
 
       if (!row.requires_passphrase) return inner;
       if (!passphrase) throw new Error('passphrase required');
+      // Creation refuses anything longer, so it cannot be right. Counted as a
+      // wrong guess without spending scrypt on up to a request body's worth.
+      if (passphrase.length > MAX_PASSPHRASE_LENGTH) throw new Error('passphrase too long');
       return openPassphraseLayer(inner, passphrase);
     });
 
