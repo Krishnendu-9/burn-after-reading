@@ -9,16 +9,21 @@ const AUTH_TAG_LENGTH = 16;
 
 let cachedKeys = null;
 
-function parseKey(raw, label) {
-  const key = Buffer.from(String(raw).trim(), 'hex');
+// Checked as text first: Buffer.from(…, 'hex') stops quietly at the first
+// non-hex character and drops a trailing odd one, so a 65-character value, or
+// one with a stray character at the end, used to pass as 32 bytes.
+const HEX_KEY = /^[0-9a-f]{64}$/i;
 
-  if (key.length !== 32) {
-    throw new Error(
-      `${label} must be 32 bytes encoded as 64 hex characters (got ${key.length} bytes).`
-    );
+function parseKey(raw, label) {
+  const text = String(raw).trim();
+
+  if (!HEX_KEY.test(text)) {
+    // The length only; the value itself is never echoed.
+    const detail = text.length === 64 ? 'some of them not hex' : `got ${text.length}`;
+    throw new Error(`${label} must be 32 bytes encoded as 64 hex characters (${detail}).`);
   }
 
-  return key;
+  return Buffer.from(text, 'hex');
 }
 
 /**

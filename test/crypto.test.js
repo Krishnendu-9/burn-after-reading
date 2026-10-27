@@ -162,3 +162,23 @@ test('a malformed previous key is rejected loudly, naming which one', async () =
 
   delete process.env.SECRET_KEY_PREVIOUS;
 });
+
+test('a key with a stray character is rejected, not quietly truncated', async () => {
+  // Buffer.from(…, 'hex') stops at the first non-hex character and drops a
+  // trailing odd one, so both of these used to pass as 32-byte keys.
+  const good = crypto.randomBytes(32).toString('hex');
+  const cases = [`${good}0`, `${good.slice(0, 63)}z`];
+
+  for (const [index, bad] of cases.entries()) {
+    process.env.SECRET_KEY = bad;
+    const broken = await import(`../src/crypto.js?stray=${index}`);
+
+    assert.throws(() => broken.encrypt('anything', TOKEN), (error) => {
+      assert.match(error.message, /64 hex characters/);
+      assert.ok(!error.message.includes(bad.slice(0, 16)), 'the key is never echoed');
+      return true;
+    });
+  }
+
+  process.env.SECRET_KEY = KEY;
+});
