@@ -9,14 +9,19 @@ instant the secret is revealed. Unread secrets expire after 1 hour, 1 day or 7 d
 
 ## Quick start
 
-Requires Node.js 22 or newer.
+Requires Node.js 22.12 or newer.
 
 ```bash
 npm install
 npm run keygen          # prints a SECRET_KEY line
 cp .env.example .env    # paste the key in
-npm run dev             # http://localhost:3000
+npm run dev             # builds once, then watches: http://localhost:3000
 ```
+
+better-sqlite3 ships its compiled binary inside the package. npm 11 uses it as
+is; npm 10 (bundled with Node 22) compiles it from source anyway, which needs
+Python and a C++ toolchain. On npm 10 without those, install with
+`npm install --ignore-scripts`: no dependency needs an install script.
 
 For production, `npm run build` and then `npm start`. `npm test` runs the 89 tests
 on Node's built-in runner; CI runs them on Node 22 and 24, checks that every test
@@ -70,6 +75,7 @@ scrypt runs on libuv's thread pool, so a burst of guesses can't stall the server
 
 ```
 server.js                entry point: config, hourly purge, graceful shutdown
+src/load-env.js          reads .env with Node's own loader, before anything else
 src/app.js               routes, middleware, validation, error handling
 src/db.js                SQLite schema, migrations and the burn
 src/crypto.js            server layer (AES-256-GCM, key rotation) + passphrase layer

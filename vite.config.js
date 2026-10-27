@@ -1,6 +1,14 @@
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
+// `npm run dev` builds once first (the predev script) and only then starts the
+// watcher alongside the server, because the server refuses to start without
+// the manifest. node --watch restarts only when an imported file changes, so a
+// server that started too early stayed down. The watcher must not empty the
+// folder again as it starts, or it deletes the manifest out from under the
+// server that just started from it.
+const watching = process.argv.includes('--watch');
+
 // Vite is used purely as an asset pipeline here: Express owns the HTTP layer and
 // renders EJS, Vite just compiles Tailwind + client JS into public/dist and
 // writes a manifest that src/assets.js reads to resolve hashed filenames.
@@ -16,9 +24,9 @@ export default defineConfig({
   publicDir: false,
   build: {
     outDir: 'public/dist',
-    emptyOutDir: true,
+    emptyOutDir: !watching,
     manifest: true,
-    rollupOptions: {
+    rolldownOptions: {
       input: 'src/client/main.js'
     }
   }

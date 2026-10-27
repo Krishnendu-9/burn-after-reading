@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './src/load-env.js';
 
 import { createApp } from './src/app.js';
 import { purgeExpired, closeDatabase } from './src/db.js';

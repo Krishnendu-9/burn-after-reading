@@ -26,8 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         # 22: what the Dockerfile ships and the floor package.json declares.
-        # 24: the current LTS. better-sqlite3 is a native module built per Node
-        #     ABI, so a major-version bump is the change most likely to break it.
+        # 24: the current LTS. better-sqlite3 is a native module (N-API since
+        #     v13), so a Node major is still the change most likely to break it.
         node: [22, 24]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,8 +39,10 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
 
+      # --ignore-scripts as in the Dockerfile: Node 22's npm 10 would otherwise
+      # compile better-sqlite3 from source despite its bundled binaries.
       - name: Install from the lockfile
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # Also builds the front end first (the pretest script): the pages read
       # Vite's manifest from public/dist, which is not in git.
@@ -77,7 +79,7 @@ jobs:
           cache: npm
 
       - name: Install from the lockfile
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Lint
         run: npm run lint

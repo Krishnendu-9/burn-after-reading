@@ -89,7 +89,7 @@ test('purgeRateLimits drops elapsed windows and keeps live ones', () => {
 /* ------------------------------------------------- blank environment values */
 
 // .env.example ships every optional value blank, so a copied .env is full of
-// lines like `MAX_SECRETS=`. dotenv loads those as empty strings, and `??` does
+// lines like `MAX_SECRETS=`. The .env loader reads those as empty strings, and `??` does
 // not treat an empty string as missing — which once turned the storage ceiling
 // into zero and made the app refuse every secret.
 test('a blank value is treated the same as an unset one', async () => {

@@ -2,9 +2,10 @@
  * Environment readers that treat "unset" and "set but empty" as the same thing.
  *
  * This exists because of a real bug. `.env.example` ships every optional value
- * blank, so a copied `.env` contains lines like `MAX_SECRETS=`. dotenv loads that
- * as an empty string, and `process.env.MAX_SECRETS ?? 10000` returns `''` — `??`
- * only catches null and undefined. `Number('')` is 0, so the storage ceiling
+ * blank, so a copied `.env` contains lines like `MAX_SECRETS=`. The .env loader
+ * (dotenv then, Node's own now) reads that as an empty string, and
+ * `process.env.MAX_SECRETS ?? 10000` returns `''` — `??` only catches null and
+ * undefined. `Number('')` is 0, so the storage ceiling
  * became zero and the app refused to store anything at all.
  *
  * Anything read from the environment should go through here.

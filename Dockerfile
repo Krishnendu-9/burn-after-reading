@@ -6,8 +6,10 @@ FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 
+# --ignore-scripts: no dependency needs an install script here (see the
+# runtime stage), and none gets to run one.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY . .
 RUN npm run build
@@ -18,11 +20,16 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-# Production dependencies only. better-sqlite3 pulls a prebuilt binary for this
-# platform, which is why the build and runtime images share a base — a native
-# module compiled against one libc will not load on another.
+# Production dependencies only. better-sqlite3 ships prebuilt binaries for each
+# platform and libc inside the package and picks one when it loads.
+#
+# --ignore-scripts because the npm bundled with Node 22 (10.x) ignores the
+# package's `"gypfile": false` and compiles it from source anyway, which fails
+# here: the slim image has no Python or compiler, and needs neither. No runtime
+# dependency has an install script of its own, and CI's smoke test proves the
+# bundled binary loads.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 COPY --from=build /app/public/dist ./public/dist
 COPY --from=build /app/views       ./views
