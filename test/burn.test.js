@@ -656,3 +656,41 @@ test('secret pages are marked no-store and carry a CSP', async () => {
   assert.match(response.headers.get('content-security-policy'), /default-src 'self'/);
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
 });
+
+/* ------------------------------------------------------- tokens in the logs */
+
+/** Runs fn with every console method captured; returns the lines written. */
+async function captureLogs(fn) {
+  const lines = [];
+  const real = { log: console.log, warn: console.warn, error: console.error };
+  for (const method of Object.keys(real)) {
+    console[method] = (...args) => lines.push(args.map(String).join(' '));
+  }
+  try {
+    await fn();
+  } finally {
+    Object.assign(console, real);
+  }
+  return lines;
+}
+
+test('an error on a reveal never writes the token to the logs', async () => {
+  // The error handler once logged req.path as it was, so a malformed body sent
+  // to /s/<token> put the token, which is as good as the secret, in the log.
+  const { body } = await createSecret(app, 'token-stays-out-of-the-logs');
+
+  let response;
+  const lines = await captureLogs(async () => {
+    response = await fetch(app.url(`/s/${body.token}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+      body: '{"passphrase":'
+    });
+  });
+  await response.text();
+
+  assert.equal(response.status, 400);
+  assert.ok(lines.some((line) => line.includes('client-error')), 'the error is still logged');
+  assert.ok(!lines.join('\n').includes(body.token), 'but without the token');
+  assert.equal(app.db.countLive(body.token), 1);
+});

@@ -15,7 +15,7 @@ import { encrypt, decrypt, encryptWithPassphrase, openPassphraseLayer } from './
 import { assets } from './assets.js';
 import { createLimiter, revealLimiter, globalLimiter } from './limits.js';
 import { securityHeaders } from './security.js';
-import { requestLogger, logEvent } from './logging.js';
+import { requestLogger, logEvent, redactPath } from './logging.js';
 import { envNumber } from './env.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -327,6 +327,8 @@ export function createApp({
 
     const status = Number(err.status ?? err.statusCode) || 500;
     const wantsJson = req.path.startsWith('/api/');
+    // The path of a reveal carries its token, which is as good as the secret.
+    const logPath = redactPath(req.path);
 
     if (status < 500) {
       // Malformed or oversized bodies land here. body-parser attaches the raw
@@ -337,8 +339,8 @@ export function createApp({
       logEvent(
         'warn',
         'client_error',
-        { method: req.method, path: req.path, status, type: err.type ?? null },
-        `[client-error] ${req.method} ${req.path} — ${err.type ?? status}`
+        { method: req.method, path: logPath, status, type: err.type ?? null },
+        `[client-error] ${req.method} ${logPath} — ${err.type ?? status}`
       );
 
       if (wantsJson) {
@@ -354,8 +356,8 @@ export function createApp({
     logEvent(
       'error',
       'server_error',
-      { method: req.method, path: req.path, message: err.message, stack: err.stack ?? null },
-      `[error] ${req.method} ${req.path} — ${err.message}\n${err.stack ?? ''}`
+      { method: req.method, path: logPath, message: err.message, stack: err.stack ?? null },
+      `[error] ${req.method} ${logPath} — ${err.message}\n${err.stack ?? ''}`
     );
 
     if (wantsJson) {

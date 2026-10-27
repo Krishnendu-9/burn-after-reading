@@ -47,10 +47,19 @@ export function logEvent(level, event, fields = {}, text) {
   );
 }
 
-/** Anything under /s/ carries a token, whatever shape it is. */
+// The shape of every token: a UUID, matched in either case.
+const TOKEN_ANYWHERE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * Anything under /s/ carries a token, whatever shape it is and in whatever
+ * case: Express routes are case-insensitive, so /S/<token> reaches the same
+ * handler, and was once logged in full because only "/s/" was checked. A
+ * token anywhere else in a path is replaced too, so a link mangled on its way
+ * here (a doubled slash, an extra prefix) is still never written down.
+ */
 function redactPath(pathname) {
-  if (pathname === '/s' || pathname.startsWith('/s/')) return '/s/:token';
-  return pathname;
+  if (/^\/+s(\/|$)/i.test(pathname)) return '/s/:token';
+  return pathname.replace(TOKEN_ANYWHERE, ':token');
 }
 
 export function requestLogger(req, res, next) {

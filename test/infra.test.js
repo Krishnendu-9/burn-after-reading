@@ -179,6 +179,27 @@ test('ordinary paths are logged as they are', () => {
   assert.equal(redactPath('/api/secrets'), '/api/secrets');
 });
 
+test('every spelling of a secret URL is redacted, not just the lowercase one', () => {
+  // Express routes are case-insensitive, so /S/<token> reaches the reveal, and
+  // only "/s/" used to be redacted.
+  const token = crypto.randomUUID();
+
+  for (const pathname of [
+    `/S/${token}`,
+    `/s/${token}/`,
+    `//s/${token}`,
+    `/s/${token.toUpperCase()}`,
+    `/somewhere/${token}`,
+    `/x/${token.toUpperCase()}/y`
+  ]) {
+    const redacted = redactPath(pathname);
+    assert.ok(!redacted.toLowerCase().includes(token), `${pathname} -> ${redacted}`);
+  }
+
+  assert.equal(redactPath(`/S/${token}`), '/s/:token');
+  assert.equal(redactPath(`/x/${token}/y`), '/x/:token/y');
+});
+
 /* ---------------------------------------------------------- log format */
 
 /** Captures whatever the logger writes, whichever console method it uses. */
