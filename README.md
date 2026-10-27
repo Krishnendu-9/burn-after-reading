@@ -54,7 +54,9 @@ SECRET_KEY                       AES-256-GCM, bound to the token   — always
 ciphertext; the key goes after the `#`, which browsers never send. As the
 confirmation page loads, it moves the key into the tab's `sessionStorage`, so
 Back and Forward never show it; the page that ends the reveal decrypts and
-deletes it. On plain HTTP (no WebCrypto) the server encrypts, and the page says so.
+deletes it. On plain HTTP (no WebCrypto) the server would have to encrypt, so the
+form says so before sending and waits for the sender to tick "send it
+unencrypted anyway".
 
 **Two steps.** Chat apps and mail scanners fetch links to build previews. If `GET`
 burned the secret, a preview bot would destroy it before the recipient clicked,

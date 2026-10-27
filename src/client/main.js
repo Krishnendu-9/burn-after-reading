@@ -113,6 +113,15 @@ if (form) {
   const expiryLabel = document.querySelector('[data-expiry]');
   const maxLength = Number(textarea.getAttribute('maxlength')) || 10000;
 
+  // Without WebCrypto (a page served over plain HTTP from anywhere but
+  // localhost) this browser cannot encrypt, so the message would travel to the
+  // server as plaintext. That is said before anything is sent, and sending it
+  // anyway takes a deliberate tick, rather than a note on the result screen
+  // once it is too late.
+  const encryptsLocally = e2e.isSupported();
+  const insecureAck = form.querySelector('[data-insecure-ack]');
+  if (!encryptsLocally) form.querySelector('[data-insecure]')?.classList.remove('hidden');
+
   const showError = (message) => {
     errorBox.querySelector('[data-error-text]').textContent = message ?? '';
     errorBox.classList.toggle('hidden', !message);
@@ -130,11 +139,13 @@ if (form) {
     counter.textContent = `${used.toLocaleString()} / ${maxLength.toLocaleString()}`;
     counter.toggleAttribute('data-near-limit', used >= maxLength * 0.9);
     progress.style.width = `${Math.min((used / maxLength) * 100, 100)}%`;
-    submit.disabled = textarea.value.trim().length === 0;
+    submit.disabled =
+      textarea.value.trim().length === 0 || (!encryptsLocally && !insecureAck?.checked);
     autoGrow();
   };
 
   textarea.addEventListener('input', sync);
+  insecureAck?.addEventListener('change', sync);
   sync();
 
   // The shortcut hint defaults to Ctrl; Apple keyboards use ⌘ instead.
@@ -187,10 +198,10 @@ if (form) {
 
       // Encrypt here whenever the browser can, so only ciphertext leaves the
       // page and the key never reaches the server at all. Without WebCrypto
-      // (a plain-HTTP origin) the server encrypts it instead, and the result
-      // screen says so rather than quietly claiming more than it delivers.
+      // (a plain-HTTP origin) the server encrypts it instead; the form warned
+      // about that before sending, and the result screen says so again.
       let key = null;
-      if (e2e.isSupported()) {
+      if (encryptsLocally) {
         const sealed = await e2e.encryptMessage(textarea.value);
         request.ciphertext = sealed.ciphertext;
         key = sealed.key;
@@ -234,6 +245,8 @@ if (form) {
       textarea.value = '';
       passphraseInput.value = '';
       setPassphraseVisible(false);
+      // Each plaintext send is its own decision.
+      if (insecureAck) insecureAck.checked = false;
     } catch (error) {
       showError(error.message);
     } finally {

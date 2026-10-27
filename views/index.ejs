@@ -148,6 +148,27 @@
               it separately from the link.
             </p>
 
+            <!-- Shown by main.js only where this browser can't encrypt (WebCrypto
+                 needs HTTPS or localhost). Said before sending, not after: by
+                 the result screen the plaintext would already have gone. The
+                 submit button stays disabled until the box is ticked. -->
+            <div data-insecure class="hidden">
+              <div class="mt-3 rounded-lg border border-red-300/60 bg-red-50/70 px-3 py-2.5 text-xs leading-relaxed text-red-800 dark:border-red-500/25 dark:bg-red-500/5 dark:text-red-200/90">
+                <p class="flex items-start gap-2">
+                  <%- include('partials/icon', { icon: 'alert', cls: 'mt-px h-3.5 w-3.5' }) %>
+                  <span>
+                    This page isn't served over HTTPS, so this browser can't encrypt your
+                    message itself. It would reach the server as plain text, readable by
+                    anyone on the network along the way and by whoever runs this server.
+                  </span>
+                </p>
+                <label class="mt-2 flex cursor-pointer items-center gap-2 pl-5.5 font-medium">
+                  <input type="checkbox" data-insecure-ack class="h-3.5 w-3.5 accent-red-600" />
+                  Send it unencrypted anyway
+                </label>
+              </div>
+            </div>
+
             <noscript>
               <p class="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/50 bg-amber-50/70 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200/90">
                 <%- include('partials/icon', { icon: 'alert', cls: 'mt-px h-3.5 w-3.5' }) %>

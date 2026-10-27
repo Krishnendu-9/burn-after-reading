@@ -797,3 +797,14 @@ test('the global rate limit answers the API in JSON, which the form can show', a
   assert.match(response.headers.get('content-type'), /application\/json/);
   assert.match((await response.json()).error, /too many requests/i);
 });
+
+/* ------------------------------------------------- the compose form, on HTTP */
+
+test('the compose form carries the plain-HTTP warning, hidden until needed', async () => {
+  // Shown by main.js only where the browser cannot encrypt, and before sending:
+  // the result screen was too late, with the plaintext already sent.
+  const html = await (await fetch(app.url('/'))).text();
+
+  assert.match(html, /<div data-insecure class="hidden">/);
+  assert.match(html, /<input type="checkbox" data-insecure-ack/);
+});
