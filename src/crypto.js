@@ -227,8 +227,3 @@ export async function openPassphraseLayer(inner, passphrase) {
 
   return decryptWith(await deriveKey(passphrase, salt), iv, authTag, ciphertext);
 }
-
-/** Reverses encryptWithPassphrase(): the server layer, then the passphrase layer. */
-export async function decryptWithPassphrase(payload, passphrase, token) {
-  return openPassphraseLayer(decrypt(payload, token), passphrase);
-}

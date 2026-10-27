@@ -3,11 +3,14 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
+import { envString } from './env.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
-const DB_PATH = process.env.DATABASE_PATH
-  ? path.resolve(ROOT, process.env.DATABASE_PATH)
+const configuredPath = envString('DATABASE_PATH');
+const DB_PATH = configuredPath
+  ? path.resolve(ROOT, configuredPath)
   : path.join(ROOT, 'data', 'app.db');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -292,5 +295,3 @@ export function closeDatabase() {
     db.close();
   }
 }
-
-export { DB_PATH };
