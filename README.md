@@ -28,8 +28,8 @@ environment), and `npm start`. Without it the asset manifest is re-read on every
 page and the startup checks for `BASE_URL` and `TRUST_PROXY` stay quiet.
 `.env` is read by Node itself; values already in the environment win.
 
-`npm test` runs the 89 tests on Node's built-in runner; CI runs them on Node 22
-and 24, checks that every test file actually ran, and gates on `npm audit`.
+`npm test` runs the suite on Node's built-in runner; CI runs it on Node 22 and 24,
+checks that every test file actually ran, and gates on `npm audit`.
 
 ## How it works
 
