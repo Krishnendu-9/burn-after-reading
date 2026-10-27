@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <%- include('partials/head', { title: heading }) %>
+  </head>
+  <%# For requests that failed or were turned away before a secret was touched.
+      No data-reveal-ended on <body>: the secret may well still be there, so
+      main.js must keep the link's key for the next attempt. %>
+  <body class="font-sans">
+    <%- include('partials/backdrop') %>
+    <%- include('partials/nav') %>
+
+    <main class="mx-auto w-full max-w-xl px-5 pt-12 sm:px-6 sm:pt-16">
+      <section class="surface animate-rise px-6 py-12 text-center shadow-xl shadow-neutral-900/5 dark:shadow-black/40">
+        <div
+          class="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white/70 text-orange-500 dark:border-white/10 dark:bg-white/[0.04]"
+        >
+          <%- include('partials/icon', { icon: 'alert', cls: 'h-6 w-6' }) %>
+        </div>
+
+        <h1 class="text-2xl font-bold tracking-tight text-balance"><%= heading %></h1>
+
+        <p class="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">
+          <%= message %>
+        </p>
+
+        <% if (locals.back) { %>
+        <a href="<%= back.href %>" class="btn-primary mt-7"><%- include('partials/icon', { icon: 'arrowLeft' }) %> <%= back.label %></a>
+        <% } else { %>
+        <a href="/" class="btn-ghost mt-7"><%- include('partials/icon', { icon: 'arrowLeft' }) %> Back to the start</a>
+        <% } %>
+      </section>
+    </main>
+
+    <%- include('partials/footer') %>
+  </body>
+</html>

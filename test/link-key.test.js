@@ -391,6 +391,29 @@ test('the confirmation page after a wrong passphrase is not marked either', asyn
   assert.equal(await endsReveal(response), false);
 });
 
+test('a refused cross-site reveal is not marked: the secret was not touched', async () => {
+  const { body } = await createSecret(app, 'wiring: refused');
+  const response = await fetch(app.url(`/s/${body.token}`), {
+    method: 'POST',
+    headers: { 'Sec-Fetch-Site': 'cross-site' }
+  });
+
+  assert.equal(response.status, 403);
+  assert.equal(await endsReveal(response), false);
+});
+
+test('the error page for an unreadable request is not marked either', async () => {
+  const { body } = await createSecret(app, 'wiring: bad body');
+  const response = await fetch(app.url(`/s/${body.token}`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+    body: '{not json'
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(await endsReveal(response), false);
+});
+
 test('the rate-limit page is not marked, so the key survives being turned away', async () => {
   let response;
   for (let i = 0; i < 100; i += 1) {

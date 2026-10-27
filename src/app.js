@@ -57,6 +57,30 @@ const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_STORED_SECRETS = envNumber('MAX_SECRETS', 10_000);
 
 /**
+ * Cheap CSRF guard for the burn. Browsers set Sec-Fetch-Site on every request;
+ * anything but same-origin is another site submitting a form on its visitors'
+ * behalf. Non-browser clients omit the header entirely and are left alone.
+ *
+ * The reveal answers with its own page, not the "destroyed" one: the secret
+ * was not touched, and that page would also have told main.js to discard the
+ * link's key.
+ */
+function sameOriginOnly(req, res, next) {
+  const fetchSite = req.get('sec-fetch-site');
+  if (!fetchSite || fetchSite === 'same-origin') return next();
+
+  const token = req.params.token?.toLowerCase();
+  res.status(403).render('refused', {
+    heading: 'That request was turned away',
+    message:
+      'A secret can only be revealed from this site’s own page, so a request ' +
+      'from anywhere else is refused. Nothing was changed: the secret is still ' +
+      'there. Open the link again and reveal it from the page it shows.',
+    back: token && TOKEN.test(token) ? { href: `/s/${token}`, label: 'Back to the secret' } : null
+  });
+}
+
+/**
  * Builds the Express app. Kept separate from server.js so tests can mount it on
  * an ephemeral port without starting the background purge or claiming PORT.
  *
@@ -261,15 +285,7 @@ export function createApp({
 
   // Step 2: the burn. Preview bots never issue POSTs, so reaching here means a
   // human chose to destroy the secret.
-  app.post('/s/:token', revealLimiter, async (req, res) => {
-    // Cheap CSRF guard. Browsers set Sec-Fetch-Site on every request; anything
-    // cross-origin is a forged submission rather than our own form. Non-browser
-    // clients omit the header entirely and are left alone.
-    const fetchSite = req.get('sec-fetch-site');
-    if (fetchSite && fetchSite !== 'same-origin') {
-      return res.status(403).render('destroyed');
-    }
-
+  app.post('/s/:token', sameOriginOnly, revealLimiter, async (req, res) => {
     const token = req.params.token.toLowerCase();
     if (!TOKEN.test(token)) {
       return res.status(404).render('destroyed', { reason: null });
@@ -357,6 +373,9 @@ export function createApp({
     res.status(404).render('destroyed');
   });
 
+  // Error pages use `refused`, not `destroyed`: a request that failed here may
+  // well have left its secret in place, and the "destroyed" page would both say
+  // otherwise and tell main.js to discard the link's key.
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
 
@@ -381,7 +400,13 @@ export function createApp({
       if (wantsJson) {
         return res.status(status).json({ error: 'Could not read the request.' });
       }
-      return res.status(status).render('destroyed');
+      return res.status(status).render('refused', {
+        heading: 'That request couldn’t be read',
+        message:
+          'Nothing was changed, so if you were revealing a secret, it is still there. ' +
+          'Go back and try again.',
+        back: null
+      });
     }
 
     // Genuine server faults. Message and stack are safe to log — they come from
@@ -398,7 +423,13 @@ export function createApp({
     if (wantsJson) {
       return res.status(500).json({ error: 'Something went wrong.' });
     }
-    res.status(500).render('destroyed');
+    res.status(500).render('refused', {
+      heading: 'Something went wrong',
+      message:
+        'The server ran into an error. If you were revealing a secret, it may still ' +
+        'be there: go back and try again in a moment.',
+      back: null
+    });
   });
 
   return app;

@@ -83,7 +83,7 @@ src/security.js          CSP with a per-request nonce, and the other headers
 src/limits.js            rate limiters, with their SQLite store in rate-limit-store.js
 src/logging.js, env.js   redacted text/JSON logs; env readers (blank = unset)
 src/client/              main.js (the pages), e2e.js (WebCrypto), link-key.js (#key handling)
-views/                   index · reveal · secret · destroyed · too-many (EJS)
+views/                   index · reveal · secret · destroyed · refused · too-many (EJS)
 test/                    burn · crypto · infra · link-key · race (.test.js)
 ```
 

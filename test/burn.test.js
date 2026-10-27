@@ -158,16 +158,23 @@ test('GET gives away nothing about whether a secret is still live', async () => 
   assert.equal(live.html, burned.html);
 });
 
-test('a cross-site POST cannot burn a secret', async () => {
+test('a cross-site POST cannot burn a secret, and is not told it did', async () => {
   const { body } = await createSecret(app, 'csrf-target');
 
-  const forged = await fetch(app.url(`/s/${body.token}`), {
-    method: 'POST',
-    headers: { 'Sec-Fetch-Site': 'cross-site' }
-  });
-  assert.equal(forged.status, 403);
+  for (const site of ['cross-site', 'same-site']) {
+    const forged = await fetch(app.url(`/s/${body.token}`), {
+      method: 'POST',
+      headers: { 'Sec-Fetch-Site': site }
+    });
+    const html = await forged.text();
 
-  // Survived the forged request.
+    assert.equal(forged.status, 403, site);
+    // The secret is untouched, so the "self-destructed" page would be a lie.
+    assert.match(html, /turned away/);
+    assert.doesNotMatch(html, /self-destructed/);
+  }
+
+  // Survived the forged requests.
   const legitimate = await reveal(app, body.token);
   assert.equal(legitimate.status, 200);
 });
@@ -735,10 +742,13 @@ test('an error on a reveal never writes the token to the logs', async () => {
       body: '{"passphrase":'
     });
   });
-  await response.text();
+  const html = await response.text();
 
   assert.equal(response.status, 400);
   assert.ok(lines.some((line) => line.includes('client-error')), 'the error is still logged');
   assert.ok(!lines.join('\n').includes(body.token), 'but without the token');
+
+  // And the page doesn't claim the secret is gone: it isn't.
+  assert.doesNotMatch(html, /self-destructed/);
   assert.equal(app.db.countLive(body.token), 1);
 });
