@@ -657,6 +657,23 @@ test('secret pages are marked no-store and carry a CSP', async () => {
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
 });
 
+test('bundled assets are cached for a year; pages still are not', async () => {
+  // securityHeaders sets no-store on everything first, and serve-static only
+  // adds its own Cache-Control when none is set, so assets were once never
+  // cached at all and every page load fetched the fonts, CSS and JS again.
+  const page = await fetch(app.url('/'));
+  const html = await page.text();
+  const script = html.match(/src="(\/dist\/[^"]+\.js)"/)?.[1];
+  assert.ok(script, 'the page links its bundle');
+
+  const asset = await fetch(app.url(script));
+  await asset.arrayBuffer();
+
+  assert.equal(asset.status, 200);
+  assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.match(page.headers.get('cache-control'), /no-store/);
+});
+
 /* --------------------------------------------------- one address per link */
 
 test('other spellings of a link are redirected to the one the reveal uses', async () => {

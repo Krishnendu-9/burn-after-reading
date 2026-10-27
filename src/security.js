@@ -26,8 +26,10 @@ function contentSecurityPolicy(nonce) {
 
 /**
  * Sets the response headers every page depends on. Mounted before the static
- * handler so bundled assets are covered too; `express.static` then replaces
- * Cache-Control with its own long-lived value for hashed filenames.
+ * handler so bundled assets are covered too. The static handler's `setHeaders`
+ * in app.js then swaps Cache-Control for a long-lived value, which is safe for
+ * hashed filenames; serve-static would not do that by itself, since it only
+ * sets the header when none is present.
  */
 export function securityHeaders(req, res, next) {
   const nonce = crypto.randomBytes(16).toString('base64');

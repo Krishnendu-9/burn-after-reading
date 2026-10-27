@@ -100,7 +100,15 @@ export function createApp({
   app.use(express.urlencoded({ extended: false, limit: '256kb' }));
   app.use(
     '/dist',
-    express.static(path.join(ROOT, 'public', 'dist'), { immutable: true, maxAge: '1y' })
+    express.static(path.join(ROOT, 'public', 'dist'), {
+      // securityHeaders has already set Cache-Control: no-store, and
+      // serve-static only adds its own header when none is set, so a `maxAge`
+      // option was silently ignored and every page load fetched the fonts, CSS
+      // and JS again. Filenames carry a content hash, so a year is safe.
+      setHeaders(res) {
+        res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    })
   );
 
   app.locals.assets = assets;
