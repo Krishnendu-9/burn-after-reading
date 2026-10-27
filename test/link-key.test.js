@@ -303,6 +303,21 @@ test('without storage, the key stays in the URL so the reveal still works', () =
   assert.equal(tab.entry.url, LINK, 'the secret page still strips its own URL');
 });
 
+test('a link reached at another spelling still hands its key to the secret page', () => {
+  // The server redirects these to /s/<token>, but the two ends must agree even
+  // without that: the form always posts to the canonical path, and a key filed
+  // under /S/… or /s/…/ was never found, so the secret burned unread.
+  for (const variant of [LINK.toUpperCase(), `${LINK}/`]) {
+    const tab = new Tab();
+    tab.navigate(`${variant}#${KEY}`, 'confirm');
+    assert.equal(tab.page.key, KEY, variant);
+
+    tab.submit('ended');
+    assert.equal(tab.page.key, KEY, `${variant}: the secret page finds the key`);
+    assert.deepEqual(storedKeys(tab), [], `${variant}: and nothing is left behind`);
+  }
+});
+
 /* ------------------------------------------------------------ page wiring */
 
 /*

@@ -28,7 +28,12 @@
  * No DOM access in here, so the test suite runs this exact file under Node.
  */
 
-const storageKey = (location) => `e2e-key:${location.pathname}`;
+// Lowercased and without a trailing slash, matching the /s/<token> the reveal
+// form posts to. The server redirects other spellings of a link to that one,
+// but if a page is ever reached at a variant (/S/…, /s/…/), the two ends must
+// still agree, or the secret page finds no key and the secret burns unread.
+const storageKey = (location) =>
+  `e2e-key:${location.pathname.toLowerCase().replace(/\/+$/, '')}`;
 
 const fragmentOf = (location) => (location.hash.length > 1 ? location.hash.slice(1) : null);
 
