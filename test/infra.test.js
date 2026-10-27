@@ -200,6 +200,47 @@ test('every spelling of a secret URL is redacted, not just the lowercase one', (
   assert.equal(redactPath(`/x/${token}/y`), '/x/:token/y');
 });
 
+/* ------------------------------------------------------- secrets from files */
+
+test('a secret can come from the file NAME_FILE points at', async () => {
+  const { envSecret } = await import('../src/env.js');
+  const file = path.join(dir, 'secret.txt');
+
+  fs.writeFileSync(file, '  from-a-file\n');
+  process.env.BAR_SECRET_FILE = file;
+  assert.equal(envSecret('BAR_SECRET'), 'from-a-file', 'trimmed, like any other value');
+
+  fs.writeFileSync(file, '\n');
+  assert.equal(envSecret('BAR_SECRET'), null, 'a blank file counts as unset');
+
+  delete process.env.BAR_SECRET_FILE;
+  process.env.BAR_SECRET = 'direct';
+  assert.equal(envSecret('BAR_SECRET'), 'direct', 'the plain variable still works');
+
+  delete process.env.BAR_SECRET;
+  assert.equal(envSecret('BAR_SECRET'), null);
+});
+
+test('a secret set both ways, or in a missing file, fails without echoing it', async () => {
+  const { envSecret } = await import('../src/env.js');
+  const file = path.join(dir, 'both.txt');
+  fs.writeFileSync(file, 'file-value');
+
+  process.env.BAR_SECRET = 'direct-value';
+  process.env.BAR_SECRET_FILE = file;
+  assert.throws(() => envSecret('BAR_SECRET'), (error) => {
+    assert.match(error.message, /Set only one/);
+    assert.ok(!error.message.includes('direct-value') && !error.message.includes('file-value'));
+    return true;
+  });
+
+  delete process.env.BAR_SECRET;
+  process.env.BAR_SECRET_FILE = path.join(dir, 'missing.txt');
+  assert.throws(() => envSecret('BAR_SECRET'), /could not be read \(ENOENT\)/);
+
+  delete process.env.BAR_SECRET_FILE;
+});
+
 /* -------------------------------------------------------- what is on disk */
 
 test('deleted secrets are overwritten in the file, not just unlinked', () => {

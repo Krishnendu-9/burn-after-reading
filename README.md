@@ -91,7 +91,7 @@ src/db.js                SQLite schema, migrations, the burn and the storage cei
 src/crypto.js            server layer (AES-256-GCM, key rotation) + passphrase layer
 src/security.js          CSP with a per-request nonce, and the other headers
 src/limits.js            rate limiters, with their SQLite store in rate-limit-store.js
-src/logging.js, env.js   redacted text/JSON logs; env readers (blank = unset)
+src/logging.js, env.js   redacted text/JSON logs; env readers (blank = unset, *_FILE)
 src/client/              main.js (the pages), e2e.js (WebCrypto), link-key.js (#key handling)
 views/                   index · reveal · secret · destroyed · refused · too-many (EJS)
 test/                    burn · crypto · infra · link-key · race (.test.js)
@@ -103,6 +103,7 @@ test/                    burn · crypto · infra · link-key · race (.test.js)
 | --- | --- |
 | `SECRET_KEY` | 32 bytes as 64 hex chars; `npm run keygen` makes one. |
 | `SECRET_KEY_PREVIOUS` | Optional old keys, comma-separated, decryption only, for rotation. |
+| `SECRET_KEY_FILE` · `SECRET_KEY_PREVIOUS_FILE` | Instead of the two above: a file holding the value, as Docker and Kubernetes secrets provide. Setting both forms of one is refused. |
 | `BASE_URL` | Public origin used to build links. Must be the real `https://` URL in production; the server warns at startup when it isn't. |
 | `NODE_ENV` | `production` in production: caches the asset manifest and turns on the startup warnings. |
 | `TRUST_PROXY` | **Off by default. Set it (`1` behind one proxy) only if a proxy really is in front**, or clients can forge `X-Forwarded-For` and bypass every rate limit. |
@@ -127,6 +128,17 @@ unread secret dies with the container. The image is multi-stage, runs as the
 unprivileged `node` user, has a `HEALTHCHECK` on `/healthz`, and shuts down
 cleanly on `docker stop`. Serve it over HTTPS: browsers only encrypt in the page
 on secure origins.
+
+To keep the key out of the container's environment (and so out of
+`docker inspect`), mount it as a file and point `SECRET_KEY_FILE` at it:
+
+```bash
+docker run -d -p 3000:3000 -v bar-data:/app/data \
+  -v "$PWD/secret_key:/run/secrets/secret_key:ro" \
+  -e SECRET_KEY_FILE=/run/secrets/secret_key \
+  -e BASE_URL=https://secrets.example.com -e TRUST_PROXY=1 \
+  burn-after-reading
+```
 
 ## Threat model
 

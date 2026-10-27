@@ -182,3 +182,30 @@ test('a key with a stray character is rejected, not quietly truncated', async ()
 
   process.env.SECRET_KEY = KEY;
 });
+
+test('the key can come from a file, as Docker and Kubernetes secrets provide it', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bar-keyfile-'));
+  const file = path.join(dir, 'secret_key');
+
+  try {
+    fs.writeFileSync(file, `${KEY}\n`);
+    delete process.env.SECRET_KEY;
+    process.env.SECRET_KEY_FILE = file;
+    const fromFile = await import('../src/crypto.js?keyfile=1');
+
+    // Same key, so it reads what the variable-configured module wrote.
+    assert.equal(fromFile.decrypt(encrypt('via a file', TOKEN), TOKEN), 'via a file');
+
+    // Both at once is ambiguous, and refused.
+    process.env.SECRET_KEY = KEY;
+    const both = await import('../src/crypto.js?keyfile=both');
+    assert.throws(() => both.encrypt('anything', TOKEN), /Set only one/);
+  } finally {
+    delete process.env.SECRET_KEY_FILE;
+    process.env.SECRET_KEY = KEY;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

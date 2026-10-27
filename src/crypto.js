@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 
+import { envSecret } from './env.js';
+
 const scrypt = promisify(crypto.scrypt);
 
 const ALGORITHM = 'aes-256-gcm';
@@ -36,19 +38,25 @@ function parseKey(raw, label) {
  * instead of being orphaned. Once everything older than the longest TTL has
  * expired, drop the previous key.
  *
+ * Either can instead come from a file named by SECRET_KEY_FILE or
+ * SECRET_KEY_PREVIOUS_FILE (see envSecret).
+ *
  * Fails loudly at first use rather than silently encrypting with a bad key.
  */
 function getKeys() {
   if (cachedKeys) return cachedKeys;
 
-  const primary = process.env.SECRET_KEY;
+  const primary = envSecret('SECRET_KEY');
   if (!primary) {
-    throw new Error('SECRET_KEY is not set. Run `npm run keygen` and add it to .env');
+    throw new Error(
+      'SECRET_KEY is not set. Run `npm run keygen` and add it to .env, ' +
+        'or point SECRET_KEY_FILE at a file holding it.'
+    );
   }
 
   const keys = [parseKey(primary, 'SECRET_KEY')];
 
-  const previous = (process.env.SECRET_KEY_PREVIOUS ?? '')
+  const previous = (envSecret('SECRET_KEY_PREVIOUS') ?? '')
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean);
