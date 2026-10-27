@@ -23,9 +23,13 @@ is; npm 10 (bundled with Node 22) compiles it from source anyway, which needs
 Python and a C++ toolchain. On npm 10 without those, install with
 `npm install --ignore-scripts`: no dependency needs an install script.
 
-For production, `npm run build` and then `npm start`. `npm test` runs the 89 tests
-on Node's built-in runner; CI runs them on Node 22 and 24, checks that every test
-file actually ran, and gates on `npm audit`.
+For production, `npm run build`, set `NODE_ENV=production` (in `.env` or the
+environment), and `npm start`. Without it the asset manifest is re-read on every
+page and the startup checks for `BASE_URL` and `TRUST_PROXY` stay quiet.
+`.env` is read by Node itself; values already in the environment win.
+
+`npm test` runs the 89 tests on Node's built-in runner; CI runs them on Node 22
+and 24, checks that every test file actually ran, and gates on `npm audit`.
 
 ## How it works
 
@@ -97,7 +101,8 @@ test/                    burn · crypto · infra · link-key · race (.test.js)
 | --- | --- |
 | `SECRET_KEY` | 32 bytes as 64 hex chars; `npm run keygen` makes one. |
 | `SECRET_KEY_PREVIOUS` | Optional old keys, comma-separated, decryption only, for rotation. |
-| `BASE_URL` | Public origin used to build links. Must be the real URL in production. |
+| `BASE_URL` | Public origin used to build links. Must be the real `https://` URL in production; the server warns at startup when it isn't. |
+| `NODE_ENV` | `production` in production: caches the asset manifest and turns on the startup warnings. |
 | `TRUST_PROXY` | **Off by default. Set it (`1` behind one proxy) only if a proxy really is in front**, or clients can forge `X-Forwarded-For` and bypass every rate limit. |
 | `PORT` · `DATABASE_PATH` · `MAX_SECRETS` | Defaults `3000`, `data/app.db`, `10000` stored rows. |
 | `LOG_REQUESTS` · `LOG_FORMAT` | Per-request logs with tokens redacted; `text` or `json`. |

@@ -83,6 +83,19 @@ const server = app.listen(PORT, () => {
     `burn-after-reading listening on ${BASE_URL}`
   );
 
+  // Every link is built from BASE_URL, so a wrong one ships broken links. And
+  // over plain HTTP the browser cannot encrypt, so the end-to-end layer is gone.
+  if (process.env.NODE_ENV === 'production' && !isPublicHttps(BASE_URL)) {
+    logEvent(
+      'warn',
+      'base_url_not_public_https',
+      { baseUrl: BASE_URL, hint: 'Set BASE_URL to the https:// address people actually reach.' },
+      `[warn] BASE_URL is ${BASE_URL}. Links are built from it, so in production it\n` +
+        '       must be the public https:// address; over plain HTTP browsers cannot\n' +
+        '       encrypt secrets themselves.'
+    );
+  }
+
   if (process.env.NODE_ENV === 'production' && trustProxy === false) {
     logEvent(
       'warn',
@@ -95,6 +108,16 @@ const server = app.listen(PORT, () => {
     );
   }
 });
+
+/** An https:// URL whose host is not this machine. */
+function isPublicHttps(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+  } catch {
+    return false;
+  }
+}
 
 /* ---------------------------------------------------------------- shutdown */
 
