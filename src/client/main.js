@@ -37,15 +37,19 @@ if (!detectExtensionTint()) {
   observer.observe(root, { attributes: true, childList: true, subtree: true });
   setTimeout(() => observer.disconnect(), 5000);
 }
+const themeToggle = document.querySelector('[data-theme-toggle]');
+
 const syncThemeIcons = () => {
   const dark = root.classList.contains('dark');
   document.querySelector('[data-icon-sun]')?.classList.toggle('hidden', !dark);
   document.querySelector('[data-icon-moon]')?.classList.toggle('hidden', dark);
+  // The button is labelled "Dark theme"; pressed says whether it is on.
+  themeToggle?.setAttribute('aria-pressed', String(dark));
 };
 
 syncThemeIcons();
 
-document.querySelector('[data-theme-toggle]')?.addEventListener('click', () => {
+themeToggle?.addEventListener('click', () => {
   const dark = root.classList.toggle('dark');
   try {
     localStorage.setItem('theme', dark ? 'dark' : 'light');

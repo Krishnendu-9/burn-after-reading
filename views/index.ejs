@@ -223,7 +223,8 @@
             <button type="button" data-copy="#secret-link" class="btn-primary shrink-0">
               <%- include('partials/icon', { icon: 'copy', attrs: 'data-copy-icon' }) %>
               <%- include('partials/icon', { icon: 'check', cls: 'hidden h-4 w-4', attrs: 'data-copied-icon' }) %>
-              <span data-copy-label>Copy link</span>
+              <%# aria-live: screen readers announce the swap to "Copied". %>
+              <span data-copy-label aria-live="polite">Copy link</span>
             </button>
           </div>
 
