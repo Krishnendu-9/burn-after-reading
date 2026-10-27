@@ -37,6 +37,26 @@ const statements = {
   purge: db.prepare('DELETE FROM rate_limits WHERE reset_at <= ?')
 };
 
+/**
+ * Reading and writing in one transaction matters: without it, two requests
+ * arriving together can both read the same count and both write count+1,
+ * losing a hit and letting a caller slip past the limit. Built once and shared
+ * by every store; the arguments carry what differs.
+ */
+const incrementWindow = db.transaction((scoped, now, windowMs) => {
+  const existing = statements.get.get(scoped);
+
+  // No window yet, or the previous one has elapsed — start a fresh one.
+  if (!existing || existing.reset_at <= now) {
+    const resetAt = now + windowMs;
+    statements.start.run(scoped, resetAt);
+    return { hits: 1, resetAt };
+  }
+
+  statements.bump.run(scoped);
+  return { hits: existing.hits + 1, resetAt: existing.reset_at };
+});
+
 /** Drops windows that have already elapsed. Called from the hourly sweep. */
 export function purgeRateLimits() {
   return statements.purge.run(Date.now()).changes;
@@ -59,36 +79,14 @@ export class SqliteRateLimitStore {
     return `${this.prefix}:${key}`;
   }
 
-  /**
-   * Reading and writing in one transaction matters: without it, two requests
-   * arriving together can both read the same count and both write count+1,
-   * losing a hit and letting a caller slip past the limit.
-   */
   increment(key) {
-    const scoped = this.#key(key);
-    const now = Date.now();
-
-    const run = db.transaction(() => {
-      const existing = statements.get.get(scoped);
-
-      // No window yet, or the previous one has elapsed — start a fresh one.
-      if (!existing || existing.reset_at <= now) {
-        const resetAt = now + this.windowMs;
-        statements.start.run(scoped, resetAt);
-        return { hits: 1, resetAt };
-      }
-
-      statements.bump.run(scoped);
-      return { hits: existing.hits + 1, resetAt: existing.reset_at };
-    });
-
     // Immediate, for the same reason as recordFailedAttempt in db.js: it takes
     // the write lock before the read. A deferred transaction reads first and
     // then has to upgrade, and SQLite refuses that upgrade with SQLITE_BUSY,
     // without waiting, whenever another connection has written in between.
     // Immediate waits its turn instead (the 5 s busy timeout), so several
     // processes sharing the file all get counted.
-    const { hits, resetAt } = run.immediate();
+    const { hits, resetAt } = incrementWindow.immediate(this.#key(key), Date.now(), this.windowMs);
     return { totalHits: hits, resetTime: new Date(resetAt) };
   }
 
