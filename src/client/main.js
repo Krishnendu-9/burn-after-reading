@@ -112,6 +112,8 @@ if (form) {
   const linkInput = document.querySelector('[data-link]');
   const expiryLabel = document.querySelector('[data-expiry]');
   const maxLength = Number(textarea.getAttribute('maxlength')) || 10000;
+  const passphraseInput = form.querySelector('[name="passphrase"]');
+  const minPassphrase = Number(passphraseInput.getAttribute('minlength')) || 4;
 
   // Without WebCrypto (a page served over plain HTTP from anywhere but
   // localhost) this browser cannot encrypt, so the message would travel to the
@@ -155,7 +157,6 @@ if (form) {
   const shortcut = form.querySelector('[data-shortcut]');
   if (shortcut && isApple) shortcut.textContent = '⌘ ↵';
 
-  const passphraseInput = form.querySelector('[name="passphrase"]');
   const setPassphraseVisible = bindPassphraseToggle(
     form.querySelector('[data-toggle-passphrase]')
   );
@@ -191,10 +192,14 @@ if (form) {
 
     try {
       const fields = new FormData(form);
-      const request = {
-        ttlHours: Number(fields.get('ttlHours')),
-        passphrase: String(fields.get('passphrase') ?? '')
-      };
+      const passphrase = String(fields.get('passphrase') ?? '');
+      const request = { ttlHours: Number(fields.get('ttlHours')) };
+
+      // The server checks this as well, but for an end-to-end secret it only
+      // ever sees the stand-in below, which is always long enough.
+      if (passphrase.trim() && passphrase.trim().length < minPassphrase) {
+        throw new Error(`A passphrase must be at least ${minPassphrase} characters.`);
+      }
 
       // Encrypt here whenever the browser can, so only ciphertext leaves the
       // page and the key never reaches the server at all. Without WebCrypto
@@ -205,8 +210,11 @@ if (form) {
         const sealed = await e2e.encryptMessage(textarea.value);
         request.ciphertext = sealed.ciphertext;
         key = sealed.key;
+        // A stand-in derived with the link's key; the passphrase stays here.
+        if (passphrase.trim()) request.passphrase = await e2e.passphraseVerifier(passphrase, key);
       } else {
         request.message = textarea.value;
+        request.passphrase = passphrase;
       }
 
       const response = await fetch('/api/secrets', {
@@ -266,8 +274,10 @@ if (form) {
 
 /* ------------------------------------------------------ reveal confirmation */
 
-// The form works on its own; this only stops an impatient double-click from
-// firing two POSTs, where the second would land on an already-burned row.
+// The form works on its own. This stops an impatient double-click from firing
+// two POSTs, where the second would land on an already-burned row, and for an
+// end-to-end link sends a stand-in for the passphrase rather than the
+// passphrase itself.
 const revealForm = document.querySelector('[data-reveal-form]');
 
 // sessionStorage can throw on access where storage is blocked; link-key.js
@@ -283,6 +293,12 @@ const tabStorage = (() => {
 if (revealForm) {
   const baseAction = revealForm.getAttribute('action');
   const keyFound = document.querySelector('[data-key-found]');
+  const button = revealForm.querySelector('[data-reveal-submit]');
+  const label = revealForm.querySelector('[data-reveal-label]');
+  const idleLabel = label?.textContent;
+  const passphraseField = revealForm.querySelector('[name="passphrase"]');
+  // The link's key, once applyKey has found it; null for a link without one.
+  let linkKeyText = null;
 
   // An end-to-end link keeps its key in the #fragment. It leaves this page's
   // URL as the page loads and waits in sessionStorage for the page that ends
@@ -291,6 +307,7 @@ if (revealForm) {
   // back/forward cache restore, by which time the reveal may have used it up.
   const applyKey = () => {
     const { key, inUrl } = linkKey.takeKey(location, history, tabStorage);
+    linkKeyText = key;
     // Only when storage failed does the key still need to travel in the URL.
     // Browsers never send a fragment to the server either way.
     revealForm.action = inUrl ? `${baseAction}#${key}` : baseAction;
@@ -299,23 +316,62 @@ if (revealForm) {
     keyFound?.toggleAttribute('hidden', !key);
   };
 
+  /** Undoes what submitting did, for a page that comes back without a reload. */
+  const resetForm = () => {
+    if (button) button.disabled = false;
+    if (label) label.textContent = idleLabel;
+    if (passphraseField) passphraseField.disabled = false;
+    revealForm.querySelector('[data-stand-in]')?.remove();
+  };
+
   applyKey();
   window.addEventListener('hashchange', applyKey);
   window.addEventListener('pageshow', (event) => {
-    if (event.persisted) applyKey();
+    if (!event.persisted) return;
+    applyKey();
+    // A back/forward cache restore brings the page back as it was left:
+    // mid-submit, with the button disabled.
+    resetForm();
   });
 
   const toggle = revealForm.querySelector('[data-toggle-passphrase]');
   const setPassphraseVisible = toggle ? bindPassphraseToggle(toggle) : null;
 
-  revealForm.addEventListener('submit', () => {
-    const button = revealForm.querySelector('[data-reveal-submit]');
-    const label = revealForm.querySelector('[data-reveal-label]');
+  passphraseField?.addEventListener('input', () => passphraseField.setCustomValidity(''));
+
+  revealForm.addEventListener('submit', async (event) => {
     if (button) button.disabled = true;
     if (label) label.textContent = 'Decrypting…';
     // Masked again before the page goes, so the passphrase isn't left on
     // screen while the next page loads.
     setPassphraseVisible?.(false);
+
+    // With the link's key in hand, the passphrase is swapped for the stand-in
+    // the sender's page derived from it (see e2e.js), so it never reaches the
+    // server. A link without a key was encrypted by the server, and its
+    // passphrase goes as typed, just as it went when the secret was created.
+    if (!linkKeyText || !passphraseField?.value.trim() || !e2e.isSupported()) return;
+
+    event.preventDefault();
+    try {
+      const standIn = document.createElement('input');
+      standIn.type = 'hidden';
+      standIn.name = 'passphrase';
+      standIn.dataset.standIn = '';
+      standIn.value = await e2e.passphraseVerifier(passphraseField.value, linkKeyText);
+      // A disabled field is left out of the submission, so only the stand-in goes.
+      passphraseField.disabled = true;
+      revealForm.append(standIn);
+      revealForm.submit();
+    } catch {
+      // Only a key too damaged to decode gets here. The secret could not be
+      // decrypted with it anyway, so nothing is sent.
+      resetForm();
+      passphraseField.setCustomValidity(
+        'The key in this link is damaged, so it can’t be used. Ask the sender for a fresh link.'
+      );
+      passphraseField.reportValidity();
+    }
   });
 }
 

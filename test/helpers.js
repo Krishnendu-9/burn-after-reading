@@ -65,14 +65,22 @@ export function createSecret(app, message, { ttlHours, passphrase } = {}) {
 
 /**
  * Create a secret the way the web form does: encrypted first with the same
- * module the browser runs, so only ciphertext is sent. Also returns the key
- * that would go after the # in the link.
+ * module the browser runs, so only ciphertext is sent, and with a passphrase
+ * sent as the stand-in the page derives from it, never as itself. Also returns
+ * the key that would go after the # in the link, and that stand-in, which is
+ * what a reveal must then send.
  */
 export async function createEncryptedSecret(app, message, { ttlHours, passphrase } = {}) {
-  const { encryptMessage } = await import('../src/client/e2e.js');
+  const { encryptMessage, passphraseVerifier } = await import('../src/client/e2e.js');
   const { ciphertext, key } = await encryptMessage(message);
+  const standIn = passphrase ? await passphraseVerifier(passphrase, key) : undefined;
 
-  return { ...(await postSecret(app, { ciphertext, ttlHours, passphrase })), key, ciphertext };
+  return {
+    ...(await postSecret(app, { ciphertext, ttlHours, passphrase: standIn })),
+    key,
+    ciphertext,
+    standIn
+  };
 }
 
 /**

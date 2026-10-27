@@ -425,13 +425,44 @@ test('the wrong key cannot decrypt an end-to-end secret', async () => {
 
 test('end-to-end and passphrase layers combine', async () => {
   const message = 'belt-and-braces';
-  const { body, key } = await createEncryptedSecret(app, message, { passphrase: 'second factor' });
+  const { body, key, standIn } = await createEncryptedSecret(app, message, {
+    passphrase: 'second factor'
+  });
 
   assert.equal(body.protected, true);
-  assert.equal((await reveal(app, body.token, 'wrong one')).status, 401);
+  const wrong = await e2e.passphraseVerifier('wrong one', key);
+  assert.equal((await reveal(app, body.token, wrong)).status, 401);
 
-  const html = await (await reveal(app, body.token, 'second factor')).text();
+  // The confirmation page sends the same stand-in, derived the same way.
+  assert.equal(await e2e.passphraseVerifier('second factor', key), standIn);
+  const html = await (await reveal(app, body.token, standIn)).text();
   assert.equal(await e2e.decryptMessage(ciphertextFrom(html), key), message);
+});
+
+test('an end-to-end passphrase never reaches the server, only its stand-in', async () => {
+  // People reuse passphrases. For an end-to-end secret the server is sent a
+  // value derived with the link's key, so it holds nothing that reveals the
+  // passphrase, and the passphrase itself does not open its layer.
+  const passphrase = 'reused-everywhere';
+  const { body, standIn } = await createEncryptedSecret(app, 'stand-in check', { passphrase });
+
+  assert.notEqual(standIn, passphrase);
+  assert.match(standIn, /^[A-Za-z0-9_-]{43}$/);
+
+  const row = app.db.db.prepare('SELECT payload FROM secrets WHERE token = ?').get(body.token);
+  const inner = serverCrypto.decrypt(row.payload, body.token);
+
+  await assert.rejects(serverCrypto.openPassphraseLayer(inner, passphrase));
+  await serverCrypto.openPassphraseLayer(inner, standIn);
+});
+
+test('the stand-in depends on the link: the same passphrase differs between secrets', async () => {
+  const { key: keyA } = await e2e.encryptMessage('a');
+  const { key: keyB } = await e2e.encryptMessage('b');
+
+  const a = await e2e.passphraseVerifier('same words', keyA);
+  assert.equal(await e2e.passphraseVerifier('  same words  ', keyA), a, 'trimmed, as the server does');
+  assert.notEqual(await e2e.passphraseVerifier('same words', keyB), a);
 });
 
 test('malformed or oversized ciphertext is rejected', async () => {

@@ -80,6 +80,19 @@ was deliberate.
 
 **Passphrases.** A wrong passphrase costs one of five attempts, not the secret.
 scrypt runs on libuv's thread pool, so a burst of guesses can't stall the server.
+For an end-to-end secret the browser never sends the passphrase itself: both the
+creating page and the confirmation page send a stand-in, PBKDF2 of the
+passphrase salted with the link's key (`passphraseVerifier` in
+`src/client/e2e.js`). The server treats it like any passphrase, but cannot turn
+it back into one that might be reused elsewhere, and cannot test guesses against
+it without the key. API clients that encrypt end to end and set a passphrase
+must derive it the same way, or the confirmation page won't match it. Secrets
+created as plaintext (`message`) still send the passphrase as typed.
+
+End-to-end secrets with a passphrase that were created before the stand-in
+existed hold the passphrase as typed, so the confirmation page can no longer
+open them. Deploy the change when none are waiting, or expect those (up to a
+week's worth) to need a fresh link.
 
 ## Project layout
 
@@ -177,8 +190,9 @@ this earns misplaced trust when it stays vague.
 - **The operator, for plaintext submissions.** Secrets sent as `message` — by API
   clients, or by browsers without WebCrypto on a plain-HTTP origin — are
   encrypted with `SECRET_KEY` on the server, so whoever runs the instance could
-  read them unless a passphrase was set. The passphrase itself does reach the
-  server in the reveal request; it is simply never written down.
+  read them unless a passphrase was set. For these the passphrase itself does
+  reach the server in the reveal request; it is simply never written down. (For
+  end-to-end secrets only a stand-in derived with the link's key is sent.)
 - **Whoever holds the link**, if no passphrase is set. The URL — key included —
   is a bearer token: whoever reads it first gets the secret. A passphrase is what
   makes the link alone insufficient.
@@ -216,10 +230,10 @@ deployed can narrow some of them.
   so they can't be zeroed; they stay in the heap until garbage collection and
   reuse, and until then can turn up in a core dump, a heap snapshot or swap.
   (Zeroing the cipher's `Buffer`s wouldn't help: the bytes already exist as
-  strings.) On the server this covers plaintext submissions and every passphrase,
-  which reaches the server even for end-to-end secrets; the browser holds
-  end-to-end plaintext the same way. Disabling core dumps and swap narrows this;
-  it does not close it.
+  strings.) On the server this covers plaintext submissions and their
+  passphrases; for end-to-end secrets it holds only the passphrase's stand-in.
+  The browser holds end-to-end plaintext the same way. Disabling core dumps and
+  swap narrows this; it does not close it.
 - **A burn is a delete, not an erasure.** SQLite's `secure_delete` is on, so a
   burned row is zeroed in the database file, and the hourly sweep resets the
   write-ahead log, but until then the log still holds the page as it was.
@@ -237,7 +251,9 @@ deployed can narrow some of them.
   secret on the server. With a copy of the database and `SECRET_KEY`, the
   passphrase layer can be attacked offline instead, at scrypt's cost per guess
   and with no limit on attempts. For a secret that is not also end-to-end, the
-  strength of the passphrase is then all that is left.
+  strength of the passphrase is then all that is left. (For an end-to-end
+  secret the guesses need the link's key too, since the stand-in is salted
+  with it, and the message itself needs the key anyway.)
 - **A link outlives its secret, and an end-to-end link carries its key.** Links
   get copied to places the app cannot clean: chat history, the clipboard and
   clipboard-history tools, and the browser's list of visited pages, which
