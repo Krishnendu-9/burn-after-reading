@@ -147,24 +147,45 @@ const statements = {
 };
 
 /**
+ * Inserts a row unless the table already holds `maxRows`.
+ *
+ * Count and insert share one immediate transaction. Checked apart, every
+ * request in flight could see the last free slot, and since a passphrase
+ * secret spends ~100 ms in scrypt between the two, a burst of them overshot
+ * the ceiling by however many arrived together.
+ */
+const insertWithinCeiling = db.transaction((row, maxRows) => {
+  if (countAll() >= maxRows) {
+    // Reclaim dead rows before refusing: the ceiling is about live storage,
+    // and a sweep is cheap next to turning a legitimate request away.
+    purgeExpired();
+    if (countAll() >= maxRows) return false;
+  }
+
+  statements.insert.run(row);
+  return true;
+});
+
+/**
  * Store an encrypted payload under a token.
  * @param {{ token: string, payload: string, ttlHours: number,
  *           requiresPassphrase?: boolean, clientEncrypted?: boolean }} secret
+ * @param {{ maxRows?: number }} [limits] refuse rather than grow past this
+ * @returns {boolean} false when storage was full and nothing was written.
  */
-export function createSecret({
-  token,
-  payload,
-  ttlHours,
-  requiresPassphrase = false,
-  clientEncrypted = false
-}) {
-  statements.insert.run({
+export function createSecret(
+  { token, payload, ttlHours, requiresPassphrase = false, clientEncrypted = false },
+  { maxRows = Infinity } = {}
+) {
+  const row = {
     token,
     payload,
     ttl: `+${ttlHours} hours`,
     requiresPassphrase: requiresPassphrase ? 1 : 0,
     clientEncrypted: clientEncrypted ? 1 : 0
-  });
+  };
+
+  return insertWithinCeiling.immediate(row, maxRows);
 }
 
 /**

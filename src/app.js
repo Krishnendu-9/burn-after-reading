@@ -3,14 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 
-import {
-  createSecret,
-  burnSecret,
-  pingDatabase,
-  countAll,
-  purgeExpired,
-  UnreadableSecretError
-} from './db.js';
+import { createSecret, burnSecret, pingDatabase, UnreadableSecretError } from './db.js';
 import { encrypt, decrypt, encryptWithPassphrase, openPassphraseLayer } from './crypto.js';
 import { assets } from './assets.js';
 import { createLimiter, revealLimiter, globalLimiter } from './limits.js';
@@ -221,18 +214,6 @@ export function createApp({
       return res.status(400).json({ error: 'That passphrase is too long.' });
     }
 
-    // Reclaim dead rows before refusing — the ceiling is about live storage, and
-    // a sweep is cheap next to turning a legitimate request away.
-    if (countAll() >= MAX_STORED_SECRETS) {
-      purgeExpired();
-
-      if (countAll() >= MAX_STORED_SECRETS) {
-        return res.status(503).json({
-          error: 'Storage is full right now. Please try again shortly.'
-        });
-      }
-    }
-
     const clientEncrypted = ciphertext !== null;
     const content = clientEncrypted ? ciphertext : message;
 
@@ -242,13 +223,17 @@ export function createApp({
       ? await encryptWithPassphrase(content, passphrase, token)
       : encrypt(content, token);
 
-    createSecret({
-      token,
-      payload,
-      ttlHours,
-      requiresPassphrase: Boolean(passphrase),
-      clientEncrypted
-    });
+    // The storage ceiling is checked inside the insert's own transaction, so
+    // requests arriving together cannot all take the last free slot.
+    const stored = createSecret(
+      { token, payload, ttlHours, requiresPassphrase: Boolean(passphrase), clientEncrypted },
+      { maxRows: MAX_STORED_SECRETS }
+    );
+    if (!stored) {
+      return res.status(503).json({
+        error: 'Storage is full right now. Please try again shortly.'
+      });
+    }
 
     // The URL carries no key. For an end-to-end secret the browser appends
     // "#<key>" itself; the server never sees it.

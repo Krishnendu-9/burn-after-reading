@@ -200,6 +200,30 @@ test('every spelling of a secret URL is redacted, not just the lowercase one', (
   assert.equal(redactPath(`/x/${token}/y`), '/x/:token/y');
 });
 
+/* -------------------------------------------------------- what is on disk */
+
+test('createSecret refuses past maxRows, after reclaiming expired rows', () => {
+  db.db.prepare('DELETE FROM secrets').run();
+  const expired = db.db.prepare(
+    `INSERT INTO secrets (token, payload, expires_at)
+     VALUES (?, 'x', datetime('now', '-1 hours'))`
+  );
+  expired.run('old-1');
+  expired.run('old-2');
+
+  const row = (token) => ({ token, payload: 'iv:tag:cipher', ttlHours: 1 });
+
+  // Full of dead rows: they are purged, and the insert goes through.
+  assert.equal(db.createSecret(row('new-1'), { maxRows: 2 }), true);
+  assert.equal(db.countAll(), 1);
+
+  assert.equal(db.createSecret(row('new-2'), { maxRows: 2 }), true);
+  assert.equal(db.createSecret(row('new-3'), { maxRows: 2 }), false, 'full of live rows');
+  assert.equal(db.countLive('new-3'), 0);
+
+  db.db.prepare('DELETE FROM secrets').run();
+});
+
 /* ------------------------------------------------- rate limiter's warnings */
 
 test('rate-limit warnings go through logEvent, by code, with no client address', async () => {

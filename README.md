@@ -87,7 +87,7 @@ scrypt runs on libuv's thread pool, so a burst of guesses can't stall the server
 server.js                entry point: config, hourly purge, graceful shutdown
 src/load-env.js          reads .env with Node's own loader, before anything else
 src/app.js               routes, middleware, validation, error handling
-src/db.js                SQLite schema, migrations and the burn
+src/db.js                SQLite schema, migrations, the burn and the storage ceiling
 src/crypto.js            server layer (AES-256-GCM, key rotation) + passphrase layer
 src/security.js          CSP with a per-request nonce, and the other headers
 src/limits.js            rate limiters, with their SQLite store in rate-limit-store.js

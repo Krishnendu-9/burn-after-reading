@@ -820,3 +820,31 @@ test('the compose form carries the plain-HTTP warning, hidden until needed', asy
   assert.match(html, /<div data-insecure class="hidden">/);
   assert.match(html, /<input type="checkbox" data-insecure-ack/);
 });
+
+/* ------------------------------------------- the ceiling under concurrency */
+
+test('requests arriving together cannot overshoot the storage ceiling', async () => {
+  // Counted before the ~100 ms of scrypt and inserted after it, every request
+  // in flight could see the same free slot. Count and insert now share one
+  // transaction. Starts from an empty table, so earlier tests' rows don't
+  // move the line, and leaves it empty for anything after.
+  app.db.db.prepare('DELETE FROM secrets').run();
+  const fill = app.db.db.prepare(
+    `INSERT INTO secrets (token, payload, expires_at)
+     VALUES (?, 'iv:tag:cipher', datetime('now', '+24 hours'))`
+  );
+  for (let i = 0; i < 37; i += 1) fill.run(`ceiling-${i}`);
+
+  const responses = await Promise.all(
+    Array.from({ length: 8 }, (_, i) =>
+      createSecret(app, `racer-${i}`, { passphrase: 'slow-on-purpose' })
+    )
+  );
+  const statuses = responses.map((r) => r.status);
+
+  assert.equal(statuses.filter((s) => s === 201).length, 3, `got ${statuses.join(', ')}`);
+  assert.equal(statuses.filter((s) => s === 503).length, 5);
+  assert.equal(app.db.countAll(), 40);
+
+  app.db.db.prepare('DELETE FROM secrets').run();
+});
