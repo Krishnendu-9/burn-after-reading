@@ -32,7 +32,7 @@ file actually ran, and gates on `npm audit`.
 | Request | What happens |
 | --- | --- |
 | `POST /api/secrets` | Takes `ciphertext` (encrypted by the browser) or plain `message` (API clients), with optional `ttlHours` (1, 24 or 168) and `passphrase`. Seals it with the server key under a random UUID v4 token and returns `{ token, url, expiresInHours, protected, endToEnd }`. |
-| `GET /s/:token` | The confirmation page. Never touches the database: every token gets the same page. |
+| `GET /s/:token` | The confirmation page. Never touches the database: every token gets the same page. Other spellings (`/S/…`, a trailing slash, upper case) redirect to `/s/<token>`; anything that isn't a UUID gets the "destroyed" page. |
 | `POST /s/:token` | The burn: reads the row, unseals it, deletes it. Only the request whose `DELETE` removes the row gets the content. |
 | `GET /healthz` | `200` while the database answers, `503` when it doesn't. |
 

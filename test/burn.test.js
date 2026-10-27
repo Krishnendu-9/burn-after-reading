@@ -657,6 +657,37 @@ test('secret pages are marked no-store and carry a CSP', async () => {
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
 });
 
+/* --------------------------------------------------- one address per link */
+
+test('other spellings of a link are redirected to the one the reveal uses', async () => {
+  // The confirmation page files the #key under its own path for the page that
+  // ends the reveal, which is always /s/<token>. Reached at a variant, the key
+  // was filed under another name, and the secret burned undecryptable.
+  const { body } = await createSecret(app, 'one-address');
+
+  for (const variant of [
+    `/S/${body.token}`,
+    `/s/${body.token}/`,
+    `/s/${body.token.toUpperCase()}`
+  ]) {
+    const response = await fetch(app.url(variant), { redirect: 'manual' });
+    assert.equal(response.status, 301, variant);
+    assert.equal(response.headers.get('location'), `/s/${body.token}`, variant);
+  }
+
+  // The canonical address itself is served as before, and nothing was burned.
+  assert.equal((await fetch(app.url(`/s/${body.token}`), { redirect: 'manual' })).status, 200);
+  assert.equal(app.db.countLive(body.token), 1);
+});
+
+test('something that is not a token gets the destroyed page without a lookup', async () => {
+  for (const pathname of ['/s/not-a-token', `/s/${'f'.repeat(36)}`]) {
+    const response = await fetch(app.url(pathname));
+    assert.equal(response.status, 404, pathname);
+    assert.match(await response.text(), /self-destructed/);
+  }
+});
+
 /* ------------------------------------------------------- tokens in the logs */
 
 /** Runs fn with every console method captured; returns the lines written. */

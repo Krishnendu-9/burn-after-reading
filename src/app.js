@@ -43,6 +43,13 @@ const MIN_CIPHERTEXT_LENGTH = Math.ceil(((E2E_OVERHEAD_BYTES + 1) * 4) / 3);
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 /**
+ * Every token comes from crypto.randomUUID(): a lowercase UUID. Anything that
+ * isn't one cannot name a secret, so it is turned away without a database
+ * lookup. That gives nothing away, since no real link looks any different.
+ */
+const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
  * Hard ceiling on stored rows. Rate limits cap a single address; they do nothing
  * about traffic spread across many. Without a ceiling the disk is the limit, and
  * SQLite failing on a full disk takes the whole app down rather than one request.
@@ -226,7 +233,22 @@ export function createApp({
   // observer nothing. Whether the secret still exists is only revealed by the
   // POST that destroys it.
   app.get('/s/:token', revealLimiter, (req, res) => {
-    res.render('reveal', { token: req.params.token, error: null });
+    const token = req.params.token.toLowerCase();
+    if (!TOKEN.test(token)) {
+      return res.status(404).render('destroyed');
+    }
+
+    // One address per secret. Routes match /S/<token> and a trailing slash
+    // too, and the confirmation page files the #key under its own path for
+    // the page that ends the reveal to find. Arriving at a variant, the reveal
+    // posted to /s/<token> and looked under a different name, so the key was
+    // lost and the secret burned unread. Browsers carry the #fragment across
+    // a redirect.
+    if (req.path !== `/s/${token}`) {
+      return res.redirect(301, `/s/${token}`);
+    }
+
+    res.render('reveal', { token, error: null });
   });
 
   // Step 2: the burn. Preview bots never issue POSTs, so reaching here means a
@@ -240,12 +262,17 @@ export function createApp({
       return res.status(403).render('destroyed');
     }
 
+    const token = req.params.token.toLowerCase();
+    if (!TOKEN.test(token)) {
+      return res.status(404).render('destroyed', { reason: null });
+    }
+
     const passphrase =
       typeof req.body?.passphrase === 'string' ? req.body.passphrase.trim() : '';
 
     // Throwing means "do not destroy this" — a wrong passphrase costs an
     // attempt, not the secret.
-    const result = await burnSecret(req.params.token, (row) => {
+    const result = await burnSecret(token, (row) => {
       // The server layer first, on its own. Failing here is never the reader's
       // doing — the key changed without rotation, or the row is damaged or holds
       // a payload copied from another row — so it is reported as unreadable
@@ -254,7 +281,7 @@ export function createApp({
       // without one could never accept, then destroy it after five tries.
       let inner;
       try {
-        inner = decrypt(row.payload, req.params.token);
+        inner = decrypt(row.payload, token);
       } catch (error) {
         throw new UnreadableSecretError(error);
       }
@@ -300,7 +327,7 @@ export function createApp({
     if (result.status === 'locked') {
       const left = result.attemptsLeft;
       return res.status(401).render('reveal', {
-        token: req.params.token,
+        token,
         error: passphrase
           ? `That passphrase was not correct. ${left} attempt${left === 1 ? '' : 's'} left before this secret is destroyed.`
           : 'This secret is passphrase-protected. Enter the passphrase the sender gave you.'
