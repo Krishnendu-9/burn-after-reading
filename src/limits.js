@@ -11,7 +11,7 @@ const WINDOW_MS = 15 * 60 * 1000;
  * Counts live in SQLite rather than memory, so they survive a restart and stay
  * consistent if the app is ever run as more than one process.
  */
-function limiter({ name, limit, message, json }) {
+function limiter({ name, limit, message }) {
   return rateLimit({
     windowMs: WINDOW_MS,
     limit,
@@ -19,7 +19,10 @@ function limiter({ name, limit, message, json }) {
     legacyHeaders: false,
     store: new SqliteRateLimitStore(name),
     handler(req, res) {
-      if (json) {
+      // By path rather than per limiter, the same rule as the error handler in
+      // app.js: the global limiter also covers the JSON API, and an HTML page
+      // there left the compose form with nothing it could show.
+      if (req.originalUrl.startsWith('/api/')) {
         return res.status(429).json({ error: message });
       }
       res.status(429).render('too-many', { message });
@@ -35,7 +38,6 @@ function limiter({ name, limit, message, json }) {
 export const createLimiter = limiter({
   name: 'create',
   limit: 20,
-  json: true,
   message: 'Too many secrets created from this address. Try again in a few minutes.'
 });
 
@@ -46,7 +48,6 @@ export const createLimiter = limiter({
 export const revealLimiter = limiter({
   name: 'reveal',
   limit: 60,
-  json: false,
   message: 'Too many attempts from this address. Try again in a few minutes.'
 });
 
@@ -54,6 +55,5 @@ export const revealLimiter = limiter({
 export const globalLimiter = limiter({
   name: 'global',
   limit: 300,
-  json: false,
   message: 'Too many requests from this address. Try again in a few minutes.'
 });

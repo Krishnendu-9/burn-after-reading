@@ -782,3 +782,18 @@ test('another site cannot create secrets through its visitors', async () => {
   });
   assert.equal(own.status, 201);
 });
+
+test('the global rate limit answers the API in JSON, which the form can show', async () => {
+  await (await fetch(app.url('/'))).text(); // opens this address's global window
+  app.db.db.prepare(`UPDATE rate_limits SET hits = 10000 WHERE key LIKE 'global:%'`).run();
+
+  const response = await fetch(app.url('/api/secrets'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'over the limit' })
+  });
+
+  assert.equal(response.status, 429);
+  assert.match(response.headers.get('content-type'), /application\/json/);
+  assert.match((await response.json()).error, /too many requests/i);
+});
