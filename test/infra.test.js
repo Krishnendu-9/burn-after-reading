@@ -200,6 +200,34 @@ test('every spelling of a secret URL is redacted, not just the lowercase one', (
   assert.equal(redactPath(`/x/${token}/y`), '/x/:token/y');
 });
 
+/* ------------------------------------------------- rate limiter's warnings */
+
+test('rate-limit warnings go through logEvent, by code, with no client address', async () => {
+  // express-rate-limit used to print these straight to the console, as plain
+  // text in the middle of a JSON log stream; some of them quote the client IP.
+  const { configureLogging } = await import('../src/logging.js');
+  const { rateLimitLogger } = await import('../src/limits.js');
+  configureLogging({ format: 'json' });
+
+  const warning = Object.assign(
+    new Error('An invalid request.ip (203.0.113.9) was detected.'),
+    { code: 'ERR_ERL_INVALID_IP_ADDRESS', help: 'https://express-rate-limit.github.io/x/' }
+  );
+  const lines = capture(() => {
+    rateLimitLogger.error(warning);
+    rateLimitLogger.error(new Error('database is locked'), 'error from store');
+  });
+  configureLogging({ format: 'text' });
+
+  const [config, store] = lines.map((line) => JSON.parse(line));
+  assert.equal(config.event, 'rate_limit_config');
+  assert.equal(config.code, 'ERR_ERL_INVALID_IP_ADDRESS');
+  assert.ok(!lines[0].includes('203.0.113.9'), 'the address must not be logged');
+
+  assert.equal(store.event, 'rate_limit_error');
+  assert.equal(store.message, 'database is locked');
+});
+
 /* ---------------------------------------------------------- log format */
 
 /** Captures whatever the logger writes, whichever console method it uses. */
