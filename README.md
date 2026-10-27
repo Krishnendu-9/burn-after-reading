@@ -36,6 +36,10 @@ file actually ran, and gates on `npm audit`.
 | `POST /s/:token` | The burn: reads the row, unseals it, deletes it. Only the request whose `DELETE` removes the row gets the content. |
 | `GET /healthz` | `200` while the database answers, `503` when it doesn't. |
 
+Both `POST` routes refuse requests that a browser marks as coming from another
+site (`Sec-Fetch-Site`), so no other page can burn a secret or create them on its
+visitors' behalf. Clients that send no such header, such as `curl`, are unaffected.
+
 ```
 browser key (in the #fragment)   AES-256-GCM, WebCrypto           — end-to-end secrets
 passphrase (optional)            scrypt → AES-256-GCM

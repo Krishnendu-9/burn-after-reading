@@ -752,3 +752,33 @@ test('an error on a reveal never writes the token to the logs', async () => {
   assert.doesNotMatch(html, /self-destructed/);
   assert.equal(app.db.countLive(body.token), 1);
 });
+
+/* ------------------------------------------------- cross-site API requests */
+
+test('another site cannot create secrets through its visitors', async () => {
+  // A plain HTML form on any site can post urlencoded fields here. Without the
+  // check, every visitor to that page would spend their own rate limit, from
+  // their own address, filling this instance's storage ceiling.
+  const before = app.db.countAll();
+
+  const forged = await fetch(app.url('/api/secrets'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Sec-Fetch-Site': 'cross-site'
+    },
+    body: 'message=from-another-site'
+  });
+
+  assert.equal(forged.status, 403);
+  assert.match((await forged.json()).error, /other sites/);
+  assert.equal(app.db.countAll(), before, 'nothing was stored');
+
+  // The page's own request, and API clients that send no such header, still work.
+  const own = await fetch(app.url('/api/secrets'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+    body: JSON.stringify({ message: 'from this site' })
+  });
+  assert.equal(own.status, 201);
+});

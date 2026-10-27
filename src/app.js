@@ -56,10 +56,15 @@ const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
  */
 const MAX_STORED_SECRETS = envNumber('MAX_SECRETS', 10_000);
 
+/** The JSON API answers in JSON, errors included; everything else is a page. */
+const wantsJson = (req) => req.originalUrl.startsWith('/api/');
+
 /**
- * Cheap CSRF guard for the burn. Browsers set Sec-Fetch-Site on every request;
- * anything but same-origin is another site submitting a form on its visitors'
- * behalf. Non-browser clients omit the header entirely and are left alone.
+ * Cheap CSRF guard for the two routes that change state. Browsers set
+ * Sec-Fetch-Site on every request; anything but same-origin is another site
+ * submitting on its visitors' behalf — burning a secret, or creating them to
+ * spend its visitors' rate limits and fill the storage ceiling. Non-browser
+ * clients omit the header entirely and are left alone.
  *
  * The reveal answers with its own page, not the "destroyed" one: the secret
  * was not touched, and that page would also have told main.js to discard the
@@ -68,6 +73,10 @@ const MAX_STORED_SECRETS = envNumber('MAX_SECRETS', 10_000);
 function sameOriginOnly(req, res, next) {
   const fetchSite = req.get('sec-fetch-site');
   if (!fetchSite || fetchSite === 'same-origin') return next();
+
+  if (wantsJson(req)) {
+    return res.status(403).json({ error: 'Requests from other sites are not accepted.' });
+  }
 
   const token = req.params.token?.toLowerCase();
   res.status(403).render('refused', {
@@ -178,7 +187,7 @@ export function createApp({
   // #fragment, so the server stores something it cannot read. `message` is
   // plaintext, for API clients and for browsers without WebCrypto (a non-HTTPS
   // origin); the server encrypts that one itself, and so could read it.
-  app.post('/api/secrets', createLimiter, async (req, res) => {
+  app.post('/api/secrets', sameOriginOnly, createLimiter, async (req, res) => {
     const body = req.body ?? {};
     const ciphertext = typeof body.ciphertext === 'string' ? body.ciphertext : null;
     const message = typeof body.message === 'string' ? body.message : '';
@@ -380,7 +389,6 @@ export function createApp({
     if (res.headersSent) return next(err);
 
     const status = Number(err.status ?? err.statusCode) || 500;
-    const wantsJson = req.path.startsWith('/api/');
     // The path of a reveal carries its token, which is as good as the secret.
     const logPath = redactPath(req.path);
 
@@ -397,7 +405,7 @@ export function createApp({
         `[client-error] ${req.method} ${logPath} — ${err.type ?? status}`
       );
 
-      if (wantsJson) {
+      if (wantsJson(req)) {
         return res.status(status).json({ error: 'Could not read the request.' });
       }
       return res.status(status).render('refused', {
@@ -420,7 +428,7 @@ export function createApp({
       `[error] ${req.method} ${logPath} — ${err.message}\n${err.stack ?? ''}`
     );
 
-    if (wantsJson) {
+    if (wantsJson(req)) {
       return res.status(500).json({ error: 'Something went wrong.' });
     }
     res.status(500).render('refused', {
