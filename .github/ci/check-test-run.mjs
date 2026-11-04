@@ -42,8 +42,11 @@ for (const name of expected) {
 
   if (counts.passed + counts.failed === 0) problems.push(`${name} ran no tests.`);
   if (counts.failed > 0) problems.push(`${name}: ${counts.failed} failed.`);
-  // A skip or todo is a test that proves nothing. The suite has none, so one
-  // appearing should be a decision someone makes here, not something CI waves through.
+  // A skip or todo is a test that proves nothing, so one appearing should be a
+  // decision someone makes here, not something CI waves through. The suite has
+  // one platform skip: the owner-only file test in infra.test.js skips on
+  // Windows. CI runs Linux, so it never appears here; adding Windows to the
+  // matrix would fail this gate until the rule is revisited.
   if (counts.skipped > 0) problems.push(`${name}: ${counts.skipped} skipped.`);
   if (counts.todo > 0) problems.push(`${name}: ${counts.todo} marked todo.`);
 }

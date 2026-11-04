@@ -439,10 +439,12 @@ test('end-to-end and passphrase layers combine', async () => {
   assert.equal(await e2e.decryptMessage(ciphertextFrom(html), key), message);
 });
 
-test('an end-to-end passphrase never reaches the server, only its stand-in', async () => {
-  // People reuse passphrases. For an end-to-end secret the server is sent a
-  // value derived with the link's key, so it holds nothing that reveals the
-  // passphrase, and the passphrase itself does not open its layer.
+test('the stand-in helpers.js sends opens the passphrase layer; the passphrase itself does not', async () => {
+  // People reuse passphrases. When a secret is created the way helpers.js
+  // does it, with the stand-in derived from the link's key, the stored layer
+  // opens with that stand-in and not with the passphrase itself. This does not
+  // cover main.js, including its fallback that submits the passphrase as typed
+  // when the reveal page has no key or no JavaScript.
   const passphrase = 'reused-everywhere';
   const { body, standIn } = await createEncryptedSecret(app, 'stand-in check', { passphrase });
 

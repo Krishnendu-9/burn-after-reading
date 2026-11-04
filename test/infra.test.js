@@ -243,11 +243,11 @@ test('a secret set both ways, or in a missing file, fails without echoing it', a
 
 /* -------------------------------------------------------- what is on disk */
 
-test('deleted secrets are overwritten in the file, not just unlinked', () => {
+test('secure_delete is switched on', () => {
   assert.equal(db.db.pragma('secure_delete', { simple: true }), 1);
 });
 
-test('the sweep empties the write-ahead log, where burned pages linger', async () => {
+test('checkpointWal() empties the write-ahead log, where burned pages linger', async () => {
   const token = crypto.randomUUID();
   db.createSecret({ token, payload: 'iv:tag:cipher', ttlHours: 1 });
   await db.burnSecret(token, (row) => row.payload);
@@ -262,7 +262,7 @@ test('the sweep empties the write-ahead log, where burned pages linger', async (
 test('the database file is readable by its owner only', (t) => {
   if (process.platform === 'win32') {
     // Windows has no POSIX modes for chmod to set. CI runs this on Linux.
-    t.diagnostic('POSIX permissions: not applicable on Windows');
+    t.skip('POSIX permissions: not applicable on Windows');
     return;
   }
   for (const suffix of ['', '-wal', '-shm']) {
