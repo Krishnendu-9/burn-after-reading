@@ -1,5 +1,7 @@
 # 🔥 Burn After Reading
 
+[![CI](https://github.com/Krishnendu-9/burn-after-reading/actions/workflows/ci.yml/badge.svg)](https://github.com/Krishnendu-9/burn-after-reading/actions/workflows/ci.yml)
+
 Share a password, API key, or note through a link that works **exactly once**.
 The message is encrypted in your browser with AES-256-GCM before it is sent, the
 key travels only in the link's `#fragment`, and the database row is deleted the
