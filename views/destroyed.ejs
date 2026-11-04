@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <%- include('partials/head', { title: locals.heading || 'This message has self-destructed' }) %>
+    <%- include('partials/head', { title: 'This message has self-destructed' }) %>
   </head>
   <body class="font-sans" data-reveal-ended>
     <%- include('partials/backdrop') %>
@@ -20,11 +20,8 @@
           <span class="absolute -top-1 left-11 h-1.5 w-1.5 rounded-full bg-neutral-400/30 animate-drift [animation-delay:2.4s] dark:bg-white/20"></span>
         </div>
 
-        <%# `heading` replaces the title for the rare case where the secret still
-            exists but can't be opened — calling that "self-destructed" would be
-            wrong. %>
         <h1 class="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-          <% if (locals.heading) { %><%= heading %><% } else { %>This message has <span class="text-gradient">self-destructed</span><% } %>
+          This message has <span class="text-gradient">self-destructed</span>
         </h1>
 
         <p class="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-pretty text-neutral-500 dark:text-neutral-400">

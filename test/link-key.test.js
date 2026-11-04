@@ -414,6 +414,20 @@ test('the error page for an unreadable request is not marked either', async () =
   assert.equal(await endsReveal(response), false);
 });
 
+test('the page for a secret the server cannot decrypt is not marked: the secret is kept', async () => {
+  // Restoring SECRET_KEY makes the same secret readable again, so its key has
+  // to survive this page for the next attempt.
+  const { body } = await createEncryptedSecret(app, 'wiring: unreadable');
+  app.db.db
+    .prepare('UPDATE secrets SET payload = ? WHERE token = ?')
+    .run(`${'00'.repeat(12)}:${'00'.repeat(16)}:abcdef`, body.token);
+
+  const response = await reveal(app, body.token);
+
+  assert.equal(response.status, 500);
+  assert.equal(await endsReveal(response), false);
+});
+
 test('the rate-limit page is not marked, so the key survives being turned away', async () => {
   let response;
   for (let i = 0; i < 100; i += 1) {

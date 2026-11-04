@@ -330,12 +330,15 @@ export function createApp({
           'SECRET_KEY changed? Put the old key in SECRET_KEY_PREVIOUS. ' +
           'Otherwise the row was altered.'
       );
-      return res.status(500).render('destroyed', {
+      // `refused`, not `destroyed`: the row is kept, so main.js must keep the
+      // link's key for when the server key is restored.
+      return res.status(500).render('refused', {
         heading: 'This secret can’t be opened',
-        reason:
+        message:
           'The server can no longer decrypt it, most likely because its encryption ' +
           'key was changed. It hasn’t been used up — if the key is restored, the ' +
-          'same link will work. Otherwise, ask the sender for a new link.'
+          'same link will work. Otherwise, ask the sender for a new link.',
+        back: null
       });
     }
 
