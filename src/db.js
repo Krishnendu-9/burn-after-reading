@@ -36,11 +36,14 @@ for (const suffix of ['', '-wal', '-shm']) {
 }
 
 /**
- * Deleted content is overwritten with zeros rather than left in free pages, so
- * a burned secret's ciphertext does not linger in the database file. The
- * write-ahead log can still hold it until checkpointWal() resets the log, and
- * the filesystem below SQLite is out of reach entirely; the README's known
- * limitations cover both. A per-connection setting, so it is set on every open.
+ * Deleted content is overwritten with zeros rather than left in free pages. In
+ * WAL mode the database file only changes at a checkpoint, so a burned row is
+ * zeroed there at the next checkpoint, not instantly; until then the file can
+ * still hold it, if a checkpoint ran between creation and burn. The write-ahead
+ * log holds it until checkpointWal() resets the log, which frees the log's
+ * blocks rather than overwriting them, and the filesystem below SQLite is out
+ * of reach entirely; the README's known limitations cover all three. A
+ * per-connection setting, so it is set on every open.
  */
 db.pragma('secure_delete = ON');
 
