@@ -36,13 +36,14 @@ checks that every test file actually ran, and gates on `npm audit`.
 | Request | What happens |
 | --- | --- |
 | `POST /api/secrets` | Takes `ciphertext` (encrypted by the browser) or plain `message` (API clients), with optional `ttlHours` (1, 24 or 168) and `passphrase`. Seals it with the server key under a random UUID v4 token and returns `{ token, url, expiresInHours, protected, endToEnd }`. |
-| `GET /s/:token` | The confirmation page. Never touches the database: every token gets the same page. Other spellings (`/S/…`, a trailing slash, upper case) redirect to `/s/<token>`; anything that isn't a UUID gets the "destroyed" page. |
+| `GET /s/:token` | The confirmation page. Never reads the secrets table: every token gets the same page. Other spellings (`/S/…`, a trailing slash, upper case) redirect to `/s/<token>`; anything that isn't a UUID gets the "destroyed" page. |
 | `POST /s/:token` | The burn: reads the row, unseals it, deletes it. Only the request whose `DELETE` removes the row gets the content. |
 | `GET /healthz` | `200` while the database answers, `503` when it doesn't. |
 
 Both `POST` routes refuse requests that a browser marks as coming from another
-site (`Sec-Fetch-Site`), so no other page can burn a secret or create them on its
-visitors' behalf. Clients that send no such header, such as `curl`, are unaffected.
+site (`Sec-Fetch-Site`), so in browsers that send that header no other page can
+burn a secret or create them on its visitors' behalf. Clients that send no such
+header, such as `curl` or a browser too old to set it, are unaffected.
 
 ```
 browser key (in the #fragment)   AES-256-GCM, WebCrypto           — end-to-end secrets
@@ -51,10 +52,10 @@ SECRET_KEY                       AES-256-GCM, bound to the token   — always
 ```
 
 **End-to-end.** The page encrypts with a fresh 256-bit key and sends only the
-ciphertext; the key goes after the `#`, which browsers never send. As the
-confirmation page loads, it moves the key into the tab's `sessionStorage`, so
-Back and Forward never show it; the page that ends the reveal decrypts and
-deletes it. On plain HTTP (no WebCrypto) the server would have to encrypt, so the
+ciphertext; the key goes after the `#`, which browsers never send. Where
+`sessionStorage` is available, the confirmation page moves the key into it as
+it loads, so Back and Forward never show it; the page that ends the reveal
+decrypts and deletes it. On plain HTTP (no WebCrypto) the server would have to encrypt, so the
 form says so before sending and waits for the sender to tick "send it
 unencrypted anyway".
 
@@ -79,13 +80,16 @@ original untouched. Rows written before the binding no longer decrypt; that brea
 was deliberate.
 
 **Passphrases.** A wrong passphrase costs one of five attempts, not the secret.
-scrypt runs on libuv's thread pool, so a burst of guesses can't stall the server.
-For an end-to-end secret the browser never sends the passphrase itself: both the
-creating page and the confirmation page send a stand-in, PBKDF2 of the
-passphrase salted with the link's key (`passphraseVerifier` in
-`src/client/e2e.js`). The server treats it like any passphrase, but cannot turn
-it back into one that might be reused elsewhere, and cannot test guesses against
-it without the key. API clients that encrypt end to end and set a passphrase
+scrypt runs on libuv's thread pool, so a burst of guesses can't block the event
+loop. For an end-to-end secret the browser sends a stand-in instead of the
+passphrase: PBKDF2 of the passphrase salted with the link's key
+(`passphraseVerifier` in `src/client/e2e.js`). The creating page always does;
+the confirmation page does only when it has the link's key and JavaScript runs.
+Without them (a link that arrived without its `#key`, JavaScript off, or no
+WebCrypto on plain HTTP) the confirmation page sends the passphrase as typed,
+and the server counts it as a wrong guess. The server treats the stand-in like
+any passphrase, but cannot turn it back into one that might be reused
+elsewhere, and cannot test guesses against it without the key. API clients that encrypt end to end and set a passphrase
 must derive it the same way, or the confirmation page won't match it. Secrets
 created as plaintext (`message`) still send the passphrase as typed.
 
@@ -105,9 +109,11 @@ src/crypto.js            server layer (AES-256-GCM, key rotation) + passphrase l
 src/security.js          CSP with a per-request nonce, and the other headers
 src/limits.js            rate limiters, with their SQLite store in rate-limit-store.js
 src/logging.js, env.js   redacted text/JSON logs; env readers (blank = unset, *_FILE)
+src/assets.js            resolves the built asset filenames from Vite's manifest
 src/client/              main.js (the pages), e2e.js (WebCrypto), link-key.js (#key handling)
 views/                   index · reveal · secret · destroyed · refused · too-many (EJS)
 test/                    burn · crypto · infra · link-key · race (.test.js)
+scripts/keygen.js        prints a fresh SECRET_KEY line (npm run keygen)
 ```
 
 ## Configuration
@@ -153,7 +159,9 @@ docker run -d -p 3000:3000 -v bar-data:/app/data \
   burn-after-reading
 ```
 
-The database and its `-wal`/`-shm` files are made owner-only (`0600`) at startup.
+On POSIX systems the database and its `-wal`/`-shm` files are made owner-only
+(`0600`) at startup, when the process owns them; if the change fails, it is
+skipped without an error.
 
 ## Threat model
 
@@ -173,8 +181,9 @@ this earns misplaced trust when it stays vague.
 - **Silent interception.** Reads are destructive and single-use, so if someone
   gets there first the recipient sees "already destroyed" — you find out.
 - **Tampering.** GCM authenticates the ciphertext and the token it belongs to;
-  an edited row fails to decrypt rather than returning altered plaintext, and so
-  does a payload copied in from another row.
+  an edited payload fails to decrypt rather than returning altered plaintext,
+  and so does a payload copied in from another row. (The row's other columns
+  are not authenticated; see the known limitations.)
 - **Preview bots.** Link unfurlers can't burn a secret, because burning needs a
   POST.
 - **Silent read receipts.** `GET` returns an identical page for every token, so
@@ -192,7 +201,8 @@ this earns misplaced trust when it stays vague.
   encrypted with `SECRET_KEY` on the server, so whoever runs the instance could
   read them unless a passphrase was set. For these the passphrase itself does
   reach the server in the reveal request; it is simply never written down. (For
-  end-to-end secrets only a stand-in derived with the link's key is sent.)
+  end-to-end secrets a stand-in derived with the link's key is sent instead,
+  except in the cases listed under **Passphrases** above.)
 - **Whoever holds the link**, if no passphrase is set. The URL — key included —
   is a bearer token: whoever reads it first gets the secret. A passphrase is what
   makes the link alone insufficient.
@@ -222,8 +232,8 @@ this earns misplaced trust when it stays vague.
 ## Known limitations
 
 These follow from the design, or from the platform under it. They are not on a
-to-do list: no change inside this project removes them, though how it is
-deployed can narrow some of them.
+to-do list: apart from the part marked as fixable below, no change inside this
+project removes them, though how it is deployed can narrow some of them.
 
 - **Plaintext sits in ordinary JavaScript strings** — the parsed request body, the
   decrypted result, the rendered page. Strings are immutable and freely copied,
@@ -231,14 +241,17 @@ deployed can narrow some of them.
   reuse, and until then can turn up in a core dump, a heap snapshot or swap.
   (Zeroing the cipher's `Buffer`s wouldn't help: the bytes already exist as
   strings.) On the server this covers plaintext submissions and their
-  passphrases; for end-to-end secrets it holds only the passphrase's stand-in.
+  passphrases; for end-to-end secrets it holds the passphrase's stand-in, or
+  the passphrase itself in the cases listed under **Passphrases** above.
   The browser holds end-to-end plaintext the same way. Disabling core dumps and
   swap narrows this; it does not close it.
 - **A burn is a delete, not an erasure.** SQLite's `secure_delete` is on, so a
-  burned row is zeroed in the database file, and the hourly sweep resets the
-  write-ahead log, but until then the log still holds the page as it was.
-  Below SQLite the bytes can survive in filesystem journals, SSD
-  wear-levelling, snapshots and backups, none of which the app can reach. What
+  burned row is zeroed in the database file at the next checkpoint, not
+  instantly; until then the file can still hold it, if a checkpoint ran between
+  creation and burn. The write-ahead log holds the page as it was until the
+  hourly sweep resets it with `wal_checkpoint(TRUNCATE)`, which frees the log's
+  blocks rather than overwriting them. Below SQLite the bytes can survive in
+  filesystem journals, SSD wear-levelling, snapshots and backups, none of which the app can reach. What
   survives is ciphertext, so its safety rests on the keys; see the next two
   points.
 - **No forward secrecy for server-encrypted secrets.** `SECRET_KEY` is
@@ -254,6 +267,17 @@ deployed can narrow some of them.
   strength of the passphrase is then all that is left. (For an end-to-end
   secret the guesses need the link's key too, since the stand-in is salted
   with it, and the message itself needs the key anyway.)
+- **Only the payload is authenticated.** GCM covers the payload and its token,
+  not the row's other columns: `attempts`, `expires_at`, `requires_passphrase`
+  and `client_encrypted`. Someone who can write to the database but has no
+  `SECRET_KEY` can reset `attempts` and keep guessing a protected secret's
+  passphrase online past five tries (they still need the link, and the rate
+  limits still apply), or move `expires_at` forward so an unread secret
+  outlives the expiry its sender chose. Flipping the two flags can garble how a
+  secret is shown or get it destroyed, but discloses nothing. `attempts` cannot
+  be protected this way, since a writer can always restore the row's original
+  count of zero; `expires_at` and the two flags are fixable, by binding them
+  into the associated data, but are not bound yet.
 - **A link outlives its secret, and an end-to-end link carries its key.** Links
   get copied to places the app cannot clean: chat history, the clipboard and
   clipboard-history tools, and the browser's list of visited pages, which
