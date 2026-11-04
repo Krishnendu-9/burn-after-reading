@@ -15,6 +15,7 @@ data
 .claude
 test
 dev_docs/
+docs/
 README.md
 Dockerfile
 .dockerignore

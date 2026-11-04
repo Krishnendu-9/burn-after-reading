@@ -7,6 +7,8 @@ The message is encrypted in your browser with AES-256-GCM before it is sent, the
 key travels only in the link's `#fragment`, and the database row is deleted the
 instant the secret is revealed. Unread secrets expire after 1 hour, 1 day or 7 days.
 
+![Creating a one-time link, revealing the secret once, then reopening the same link to find it self-destructed.](docs/images/demo.gif)
+
 **Stack:** Node.js · Express 5 · better-sqlite3 · native `crypto` · WebCrypto · EJS · Tailwind CSS 4 · Vite
 
 ## Quick start
